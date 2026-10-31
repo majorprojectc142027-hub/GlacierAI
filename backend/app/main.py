@@ -11,6 +11,8 @@ from backend.app.api.historical import router as historical_router
 from backend.app.api.classification import (
     router as classification_router
 )
+from backend.app.api.debris import router as debris_router
+
 
 # ==========================================================
 # PROJECT PATHS
@@ -97,12 +99,23 @@ app.include_router(
     tags=["Historical Analysis"],
 )
 
+
 # Glacier Type Classification API
 app.include_router(
     classification_router,
     prefix="/api/classification",
     tags=["Glacier Classification"],
 )
+
+
+# Debris Analysis API
+app.include_router(
+    debris_router,
+    prefix="/api/debris",
+    tags=["Debris Analysis"],
+)
+
+
 # ==========================================================
 # HOME
 # ==========================================================

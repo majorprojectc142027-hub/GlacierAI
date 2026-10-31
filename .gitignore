@@ -8,3 +8,21 @@ __pycache__/
 node_modules/
 dist/
 .vite/
+
+# Virtual environments
+**/venv/
+**/venv_old/
+.venv/
+
+# Generated outputs
+**/outputs/
+
+# Backup files
+*.backup
+*.bak_*
+
+# Backup files
+*.bak
+
+# Generated diagnostic images
+experiments/*.png

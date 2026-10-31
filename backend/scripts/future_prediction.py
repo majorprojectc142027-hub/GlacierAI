@@ -1,4 +1,4 @@
-"""
+﻿"""
 GlacierAI - Validation-Aware Future Glacier Area Prediction
 
 Purpose
@@ -33,7 +33,6 @@ import numpy as np
 
 from backend.scripts.change_analysis import assess_observation_quality
 
-
 # ============================================================
 # PATHS
 # ============================================================
@@ -42,11 +41,9 @@ BASE_DIR = Path(__file__).resolve().parents[2]
 
 HISTORICAL_DIR = BASE_DIR / "datasets" / "historical"
 
-
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
-
 
 def slugify(value: str) -> str:
     """
@@ -70,7 +67,6 @@ def slugify(value: str) -> str:
 
     return slug.strip("_")
 
-
 def rgi_slug(rgi_id: str | None) -> str:
     """
     Convert an RGI ID into the exact folder format used by GlacierAI.
@@ -87,11 +83,9 @@ def rgi_slug(rgi_id: str | None) -> str:
 
     return str(rgi_id).strip().lower()
 
-
 # ============================================================
 # FIND HISTORICAL FILE
 # ============================================================
-
 
 def find_historical_file(
     glacier_name: str | None = None,
@@ -219,11 +213,9 @@ def find_historical_file(
 
     return None
 
-
 # ============================================================
 # LOAD HISTORICAL OBSERVATIONS
 # ============================================================
-
 
 def extract_raw_observations(
     data: dict,
@@ -313,11 +305,9 @@ def extract_raw_observations(
 
     return observations
 
-
 # ============================================================
 # VALIDATION SCREEN
 # ============================================================
-
 
 def prepare_validated_observations(
     data: dict,
@@ -430,11 +420,9 @@ def prepare_validated_observations(
         summary,
     )
 
-
 # ============================================================
 # FUTURE PREDICTION
 # ============================================================
-
 
 def generate_future_prediction(
     glacier_name: str | None = None,
@@ -576,34 +564,17 @@ def generate_future_prediction(
         )
 
     elif len(all_observations) >= 2:
-
-        # ----------------------------------------------------
-        # Lower-confidence fallback
-        # ----------------------------------------------------
-
-        regression_observations = (
-            all_observations
-        )
-
-        prediction_confidence = (
-            "lower_confidence"
-        )
-
-        prediction_method = (
-            "Historical U-Net Area Linear Trend "
-            "(validation metadata unavailable)"
-        )
-
+        # Use all historical observations only as an explicitly low-confidence fallback.
+        # This makes a trend available when quality metadata is missing, without claiming validation.
+        regression_observations = all_observations
+        prediction_confidence = "low"
+        prediction_method = "Low-Confidence Historical U-Net Area Linear Trend"
         prediction_note = (
-            "A trend-based estimate was generated "
-            "from the available historical U-Net "
-            "area observations because at least "
-            "two observations exist but validation "
-            "metadata is unavailable. Treat this "
-            "as a lower-confidence estimate, not "
-            "a physical climate prediction."
+            "Low-confidence trend-based estimate fitted to available historical observations "
+            "because fewer than two observations passed HIGH/MEDIUM quality checks. "
+            "Review the input dates, segmentation masks, and area calculations before use. "
+            "This is not a physical climate prediction and must not be treated as confirmed retreat."
         )
-
     else:
 
         output_data = {
@@ -1037,7 +1008,7 @@ def generate_future_prediction(
     )
 
     plt.ylabel(
-        "Glacier Area (km²)"
+        "Glacier Area (km┬▓)"
     )
 
     plt.title(
@@ -1075,11 +1046,9 @@ def generate_future_prediction(
             str(graph_file),
     }
 
-
 # ============================================================
 # COMMAND-LINE INTERFACE
 # ============================================================
-
 
 def main():
 
@@ -1271,7 +1240,7 @@ def main():
         data[
             "trend_slope_km2_per_year"
         ],
-        "km²/year",
+        "km┬▓/year",
     )
 
     print()
@@ -1292,7 +1261,7 @@ def main():
             prediction[
                 "predicted_area_km2"
             ],
-            "km²",
+            "km┬▓",
         )
 
     print()
@@ -1302,7 +1271,7 @@ def main():
         data[
             "predicted_change_km2"
         ],
-        "km²",
+        "km┬▓",
     )
 
     print(
@@ -1333,11 +1302,9 @@ def main():
 
     print("=" * 70)
 
-
 # ============================================================
 # ENTRY POINT
 # ============================================================
-
 
 if __name__ == "__main__":
 

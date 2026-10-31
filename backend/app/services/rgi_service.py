@@ -13,7 +13,7 @@ except ImportError:
     GLACIER_ALIASES = {}
 
 
-# ==========================================================
+# ======================================================if alias_name:
 # RGI DATASET
 # ==========================================================
 
@@ -808,6 +808,193 @@ def _search_glims_name_fallback(
 
 
 # ==========================================================
+# WIKIDATA NAME SEARCH FALLBACK
+# ==========================================================
+
+WIKIDATA_API_URL = "https://www.wikidata.org/w/api.php"
+WIKIDATA_HEADERS = {
+    "User-Agent": (
+        "GlacierAI/1.0 "
+        "(AI-based glacier monitoring research project; "
+        "contact via project repository)"
+    ),
+    "Accept": "application/json",
+}
+
+
+def _search_wikidata_by_name(
+    query: str,
+    limit: int = 20,
+):
+    """
+    Resolve a human glacier name through Wikidata when the local
+    RGI attributes and current GLIMS name field do not contain it.
+
+    Wikidata is used only as a name/coordinate discovery layer.
+    The actual glacier geometry and RGI identity still come from
+    the local RGI v7 dataset by resolving the Wikidata coordinates
+    to the nearest local RGI glacier.
+    """
+
+    normalized = normalize_query(query)
+
+    if not normalized:
+        return []
+
+    try:
+        search_response = requests.get(
+            WIKIDATA_API_URL,
+            params={
+                "action": "wbsearchentities",
+                "search": normalized,
+                "language": "en",
+                "uselang": "en",
+                "format": "json",
+                "limit": min(max(int(limit) * 2, 5), 50),
+            },
+            headers=WIKIDATA_HEADERS,
+            timeout=20,
+        )
+        search_response.raise_for_status()
+        search_data = search_response.json()
+
+        search_results = search_data.get("search", [])
+        if not search_results:
+            return []
+
+        entity_ids = [
+            str(item.get("id"))
+            for item in search_results
+            if item.get("id")
+        ]
+
+        if not entity_ids:
+            return []
+
+        entity_response = requests.get(
+            WIKIDATA_API_URL,
+            params={
+                "action": "wbgetentities",
+                "ids": "|".join(entity_ids),
+                "props": "labels|descriptions|claims",
+                "languages": "en",
+                "format": "json",
+            },
+            headers=WIKIDATA_HEADERS,
+            timeout=20,
+        )
+        entity_response.raise_for_status()
+        entity_data = entity_response.json()
+
+    except requests.RequestException as error:
+        print(f"Warning: Wikidata glacier search failed: {error}")
+        return []
+    except ValueError as error:
+        print(f"Warning: Wikidata returned invalid JSON: {error}")
+        return []
+
+    glaciers = []
+    seen_rgi_ids = set()
+
+    for entity_id in entity_ids:
+        entity = entity_data.get("entities", {}).get(entity_id, {})
+        claims = entity.get("claims", {}) or {}
+
+        # Wikidata P625 = coordinate location.
+        coordinate_claims = claims.get("P625", [])
+        coordinate = None
+
+        for claim in coordinate_claims:
+            value = (
+                claim.get("mainsnak", {})
+                .get("datavalue", {})
+                .get("value", {})
+            )
+
+            if "latitude" in value and "longitude" in value:
+                coordinate = value
+                break
+
+        if coordinate is None:
+            continue
+
+        latitude = coordinate.get("latitude")
+        longitude = coordinate.get("longitude")
+
+        if latitude is None or longitude is None:
+            continue
+
+        try:
+            nearest = find_nearest_glacier(
+                latitude=float(latitude),
+                longitude=float(longitude),
+                max_distance_km=50.0,
+            )
+        except Exception as error:
+            print(
+                f"Warning: Could not resolve Wikidata entity "
+                f"{entity_id} to local RGI: {error}"
+            )
+            nearest = None
+
+        if not nearest:
+            continue
+
+        rgi_id = str(nearest["rgi_id"])
+
+        if rgi_id in seen_rgi_ids:
+            continue
+
+        seen_rgi_ids.add(rgi_id)
+
+        label = (
+            entity.get("labels", {})
+            .get("en", {})
+            .get("value")
+        )
+
+        if not label:
+            label = normalized.title()
+
+        # Only accept a result when the Wikidata label is reasonably
+        # related to the user's query. This avoids returning an
+        # unrelated nearby glacier from a broad Wikidata search.
+        label_normalized = normalize_query(label)
+        if (
+            normalized not in label_normalized
+            and label_normalized not in normalized
+        ):
+            continue
+
+        region_code = get_rgi_region_code(rgi_id)
+        region_name = (
+            RGI_REGIONS.get(region_code, "Global")
+            if region_code
+            else "Global"
+        )
+
+        glaciers.append({
+            "rgi_id": rgi_id,
+            "name": (
+                label
+                if str(label).lower().endswith("glacier")
+                else f"{label} Glacier"
+            ),
+            "latitude": round(float(nearest["latitude"]), 6),
+            "longitude": round(float(nearest["longitude"]), 6),
+            "area_km2": nearest.get("area_km2"),
+            "region": region_name,
+            "country": region_name,
+            "matched_by": "wikidata_name",
+        })
+
+        if len(glaciers) >= limit:
+            break
+
+    return glaciers
+
+
+# ==========================================================
 # SEARCH GLOBAL RGI
 # ==========================================================
 
@@ -977,8 +1164,20 @@ def search_glaciers(
             if alias_results:
                 return alias_results
 
-            # 2. Fall back to the live GLIMS name search when available.
-            return _search_glims_name_fallback(
+            # 2. Try the live GLIMS name search.
+            glims_results = _search_glims_name_fallback(
+                query=raw_query,
+                limit=limit,
+            )
+
+            if glims_results:
+                return glims_results
+
+            # 3. Use Wikidata as a global name/coordinate discovery
+            # layer when the RGI and GLIMS name fields do not contain
+            # the glacier name. The final geometry still comes from
+            # the local RGI v7 inventory.
+            return _search_wikidata_by_name(
                 query=raw_query,
                 limit=limit,
             )
@@ -1246,6 +1445,13 @@ def find_glacier_by_name(
         "matched_by",
         "name",
     )
+
+    # Preserve the human-readable name resolved during search.
+    # This is important for glaciers whose RGI record has no
+    # value in the "glac_name" field, but whose name was resolved
+    # through the local alias table (for example, Kolahoi).
+    if selected.get("name"):
+        result["name"] = selected["name"]
 
     result[
         "geometry"

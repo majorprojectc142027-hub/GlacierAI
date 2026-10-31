@@ -9,10 +9,12 @@ from torchvision.models import resnet18
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
+
 MODEL_PATH = (
     PROJECT_ROOT
+    / "backend"
     / "checkpoints"
-    / "glacier_classifier_v3.pth"
+    / "glacier_classifier_scene_v1.pth"
 )
 
 
@@ -45,18 +47,18 @@ TRANSFORM = transforms.Compose([
 ])
 
 
+
+
+
+
 def build_model():
-
     model = resnet18(weights=None)
-
     in_features = model.fc.in_features
 
-    model.fc = nn.Sequential(
-        nn.Dropout(0.35),
-        nn.Linear(
-            in_features,
-            len(CLASS_NAMES),
-        ),
+    # Match the existing scene_v1 checkpoint architecture.
+    model.fc = nn.Linear(
+        in_features,
+        len(CLASS_NAMES),
     )
 
     return model

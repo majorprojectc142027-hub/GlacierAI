@@ -1,5827 +1,1548 @@
 import { useEffect, useRef, useState } from "react";
-
 import {
-  MapContainer,
-  TileLayer,
-  CircleMarker,
-  Polygon,
-  Popup,
-  useMap,
-} from "react-leaflet";
-
-import "leaflet/dist/leaflet.css";
-
-import {
-  ArrowRight,
-  BarChart3,
-  CheckCircle2,
-  ChevronRight,
-  Database,
-  Download,
-  FileText,
-  Globe2,
-  Layers3,
-  Menu,
-  Moon,
   Mountain,
-  Search,
-  Satellite,
-  Settings,
-  Snowflake,
+  LayoutDashboard,
+  Globe2,
+  ScanSearch,
+  History,
+  Layers3,
+  FileText,
   Sun,
+  Moon,
+  Monitor,
+  //ChevronDown,
+  Menu,
+  ChevronRight,
+  Snowflake,
+  MapPin,
+  Download,
+  ArrowUpRight,
+  CircleCheck,
   X,
+  Search,
+  LoaderCircle,
 } from "lucide-react";
-
 import "./App.css";
-
-
-/* =========================================================
-   TYPES
-========================================================= */
-
-type Theme = "light" | "dark" | "system";
-
-
+const API_BASE_URL = "http://127.0.0.1:8000";
+type Page =
+  | "Overview"
+  | "Global Map"
+  | "AI Analysis"
+  | "History"
+  | "Debris"
+  | "Reports";
 type Glacier = {
-  id: string;
+  rgi_id: string;
   name: string;
-  region: string;
-  country: string;
-
-  latitude: number;
-  longitude: number;
-
-  area: number | null;
-
-  retreatRate?: number;
-  elevation?: number;
-  status?: "Stable" | "Retreating" | "Rapid Retreat";
-
-  matched_by?: string;
-};
-
-
-/* =========================================================
-   SEARCH RESPONSE
-========================================================= */
-
-type GlacierSearchResponse = {
-  results: Array<{
-    id: string;
-    name: string;
-    latitude: number;
-    longitude: number;
-    area_km2: number | null;
-    region: string;
-    country: string;
-    matched_by?: string;
-  }>;
-
-  count: number;
-  query: string;
-};
-
-
-/* =========================================================
-   GLACIER GEOMETRY RESPONSE
-========================================================= */
-
-type GlacierGeometry =
-  | {
-      type: "Polygon";
-      coordinates: number[][][];
-    }
-  | {
-      type: "MultiPolygon";
-      coordinates: number[][][][];
-    };
-
-
-type GlacierGeometryResponse = {
-  status: string;
-
-  glacier: {
-    id: string;
-    name: string;
-
-    latitude: number | null;
-    longitude: number | null;
-
-    area_km2: number | null;
-
-    region: string;
-    country: string;
-
-    geometry: GlacierGeometry | null;
-  };
-};
-
-
-/* =========================================================
-   LIVE ANALYSIS RESPONSE
-========================================================= */
-
-type LiveAnalysis = {
-  status: string;
-
-  glacier: {
-    requested_name?: string;
-    rgi_id?: string;
-    rgi_name?: string;
-    name?: string;
-
-    latitude: number;
-    longitude: number;
-
-    rgi_area_km2?: number;
-    distance_from_input_km?: number;
-    matched_by?: string;
-  };
-
-  satellite: {
-    source: string;
-    processing: string;
-    aoi_source?: string;
-
-    resolution_m: number;
-    crs: string;
-
-    cloud_limit_percent: number;
-    observation_window_days: number;
-
-    scene_id?: string | null;
-    observation_date?: string | null;
-  };
-
-  model: {
-    name: string;
-    type: string;
-    checkpoint: string;
-  };
-
-  analysis: {
-    glacier_pixels: number;
-    total_pixels: number;
-
-    coverage_percent: number;
-
-    area_m2: number;
-    area_km2: number;
-
-    rgi_polygon_applied?: boolean;
-
-    xai?: {
-      mean_probability: number;
-      minimum_probability: number;
-      maximum_probability: number;
-      threshold: number;
-
-      confidence_distribution_percent: {
-        low: number;
-        uncertain: number;
-        moderate: number;
-        high: number;
-      };
-
-      pixel_counts: {
-        low: number;
-        uncertain: number;
-        moderate: number;
-        high: number;
-        total: number;
-      };
-
-      explanation: string;
-    };
-  };
-
-  outputs: {
-    mask: string;
-    mask_png: string;
-    overlay: string;
-
-    probability_heatmap?: string;
-    probability_overlay?: string;
-    rgi_mask?: string;
-  };
-
-  classification?: {
-    class?: string;
-    display_name?: string;
-    confidence?: number;
-    confidence_percent?: number;
-    probabilities?: Record<string, number>;
-    source?: string;
-    verification_status?: string;
-    verification?: {
-      rgi_available?: boolean;
-      rgi_glacier_id?: string;
-      rgi_glacier_name?: string;
-      metadata_source?: string;
-      status?: string;
-      note?: string;
-    };
-  };
-};
-
-
-/* =========================================================
-   HISTORICAL
-========================================================= */
-
-type HistoricalPoint = {
-  year: number;
-  date: string;
-  area_km2: number;
-
-  dice?: number;
-  iou?: number;
-  coverage_percent?: number;
-
-  rgi_overlap_dice?: number;
-  rgi_overlap_iou?: number;
-  rgi_coverage_percent?: number;
-
-  area_difference_km2?: number;
-  area_difference_percent?: number;
-
-  reliability?: "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
-};
-
-
-type GlimsHistoricalRecord = {
-  id?: string | number;
-  glims_id?: string | null;
-  year?: number | null;
-  date?: string | null;
-  area_km2?: number | null;
-  analysis_id?: string | number | null;
-  submission_id?: string | number | null;
-  status?: string | null;
-  source?: string | null;
-  glacier_name?: string | null;
-  geometry?: unknown;
-};
-
-type GlimsReference = {
- 
-  success?: boolean;
-  rgi_id?: string;
-  glims_id?: string;
-  glims_layer?: string;
-  count?: number;
-  historical_records?: GlimsHistoricalRecord[];
-  message?: string;
-};
-
-type HistoricalChange = {
-  from_year: number;
-  to_year: number;
-
-  from_area_km2: number;
-  to_area_km2: number;
-
-  area_change_km2: number;
-
-  percentage_change: number | null;
-
-  annualized_area_change_km2_per_year?: number | null;
-
-  from_reliability: string;
-  to_reliability: string;
-
-  suitable_for_retreat?: boolean;
-
-  change_interpretation: string;
-};
-
-
-type ChangeAnalysisData = {
-  status?: string;
-  glacier?: string;
-  analysis_type?: string;
-  method?: string;
-
-  quality_summary?: {
-    high: number;
-    medium: number;
-    low: number;
-    unknown: number;
-    total: number;
-  };
-
-  observation_quality?: Array<{
-    year: number;
-    quality: "HIGH" | "MEDIUM" | "LOW" | "UNKNOWN";
-    dice?: number;
-    iou?: number;
-    rgi_coverage_percent?: number;
-    area_difference_percent?: number;
-  }>;
-
-  year_to_year_area_change?: HistoricalChange[];
-
-  spatial_boundary_change?: Array<{
-    from_year: number;
-    to_year: number;
-    available: boolean;
-    gained_area_km2?: number;
-    lost_area_km2?: number;
-    changed_area_km2?: number;
-    spatial_iou?: number | null;
-    note?: string;
-    reason?: string;
-  }>;
-
-  overall_trend?: {
-    status?: string;
-    usable_observations?: number;
-    total_observations?: number;
-    start_year?: number | null;
-    end_year?: number | null;
-    start_area_km2?: number | null;
-    end_area_km2?: number | null;
-    area_change_km2?: number | null;
-    percentage_change?: number | null;
-    annualized_area_change_km2_per_year?: number | null;
-    retreat_rate_m_per_year?: number | null;
-    trend?: string;
-    note?: string;
-  };
-
-  scientific_note?: string;
-};
-
-
-type HistoricalAnalysisData = {
-  records?: HistoricalPoint[];
-
-  year_to_year_changes?: HistoricalChange[];
-
-  overall_observed_change?: {
-    start_year: number;
-    end_year: number;
-
-    start_area_km2: number;
-    end_area_km2: number;
-
-    total_change_km2: number;
-
-    percentage_change: number | null;
-
-    annualized_change_km2_per_year: number | null;
-  };
-
-  reliability_summary?: {
-    total_observations: number;
-
-    high_confidence: number;
-    medium_confidence: number;
-    low_confidence: number;
-
-    reliable_observations: number;
-
-    high_confidence_years: number[];
-    medium_confidence_years: number[];
-    low_confidence_years: number[];
-  };
-
-  trend_assessment?: {
-    status: string;
-    high_confidence_observations: number;
-    note: string;
-  };
-};
-
-
-/* =========================================================
-   PREDICTION
-========================================================= */
-
-type PredictionPoint = {
-  year: number;
-
-  predicted_area_km2?: number;
+  latitude?: number;
+  longitude?: number;
   area_km2?: number;
-  predicted?: number;
+  region?: string;
+  country?: string;
+  geometry?: Record<string, unknown> | null;
+  raw: Record<string, unknown>;
 };
-
-
-type PredictionResponse = {
-  predictions?: PredictionPoint[];
-  data?: PredictionPoint[];
-  results?: PredictionPoint[];
-};
-
-
-/* =========================================================
-   API
-========================================================= */
-
-const API = "http://127.0.0.1:8000";
-
-
-/* =========================================================
-   MAP HELPERS
-========================================================= */
-
-function polygonToLeafletPositions(
-  coordinates: number[][][],
-): [number, number][][] {
-  return coordinates.map(
-    (ring) =>
-      ring.map(
-        ([lng, lat]) =>
-          [lat, lng] as [number, number],
-      ),
-  );
-}
-
-
-function multiPolygonToLeafletPositions(
-  coordinates: number[][][][],
-): [number, number][][][] {
-  return coordinates.map(
-    (polygon) =>
-      polygon.map(
-        (ring) =>
-          ring.map(
-            ([lng, lat]) =>
-              [lat, lng] as [
-                number,
-                number,
-              ],
-          ),
-      ),
-  );
-}
-
-
-/* =========================================================
-   MAP RECENTER
-========================================================= */
-
-function RecenterMap({
-  latitude,
-  longitude,
-  geometry,
-}: {
-  latitude: number;
-  longitude: number;
-
-  geometry: GlacierGeometry | null;
-}) {
-  const map = useMap();
-
-
-  useEffect(() => {
-
-    if (!geometry) {
-
-      map.flyTo(
-        [latitude, longitude],
-        7,
-        {
-          duration: 1.2,
-        },
-      );
-
-      return;
+const navigation = [
+  { label: "Overview", icon: LayoutDashboard },
+  { label: "Global Map", icon: Globe2 },
+  { label: "AI Analysis", icon: ScanSearch },
+  { label: "History", icon: History },
+  { label: "Debris", icon: Layers3 },
+  { label: "Reports", icon: FileText },
+] as const;
+function asText(...values: unknown[]): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) {
+      return value.trim();
     }
-
-
-    try {
-
-      const allPoints: [
-        number,
-        number,
-      ][] = [];
-
-
-      if (
-        geometry.type ===
-        "Polygon"
-      ) {
-
-        geometry.coordinates.forEach(
-          (ring) => {
-
-            ring.forEach(
-              ([lng, lat]) => {
-
-                allPoints.push([
-                  lat,
-                  lng,
-                ]);
-
-              },
-            );
-
-          },
-        );
-
-      } else {
-
-        geometry.coordinates.forEach(
-          (polygon) => {
-
-            polygon.forEach(
-              (ring) => {
-
-                ring.forEach(
-                  ([lng, lat]) => {
-
-                    allPoints.push([
-                      lat,
-                      lng,
-                    ]);
-
-                  },
-                );
-
-              },
-            );
-
-          },
-        );
-
-      }
-
-
-      if (
-        allPoints.length === 0
-      ) {
-
-        map.flyTo(
-          [latitude, longitude],
-          7,
-          {
-            duration: 1.2,
-          },
-        );
-
-        return;
-      }
-
-
-      map.fitBounds(
-        allPoints,
-        {
-          padding: [
-            50,
-            50,
-          ],
-
-          maxZoom: 13,
-
-          animate: true,
-
-          duration: 1.2,
-        },
-      );
-
-    } catch {
-
-      map.flyTo(
-        [latitude, longitude],
-        7,
-        {
-          duration: 1.2,
-        },
-      );
-
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return String(value);
     }
-
-  }, [
-    latitude,
-    longitude,
-    geometry,
-    map,
-  ]);
-
-
-  return null;
+  }
+  return "";
 }
-
-
-/* =========================================================
-   NORMALIZE PREDICTION
-========================================================= */
-
-function normalizePrediction(
-  payload: unknown,
-): PredictionPoint[] {
-
-  /*
-   * The prediction API can return either:
-   *   [...]
-   *   { predictions: [...] }
-   *   { data: [...] }
-   *   { data: { predictions: [...] } }
-   *   { data: { results: [...] } }
-   *
-   * Always unwrap the response until we reach the
-   * actual prediction array. This prevents errors such
-   * as "raw.filter is not a function".
-   */
-  const unwrapPredictionArray = (
-    value: unknown,
-  ): unknown[] => {
-
-    if (Array.isArray(value)) {
+function asNumber(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) {
       return value;
     }
-
-    if (!value || typeof value !== "object") {
-      return [];
-    }
-
-    const object = value as Record<string, unknown>;
-
-    if (Array.isArray(object.predictions)) {
-      return object.predictions;
-    }
-
-    if (Array.isArray(object.results)) {
-      return object.results;
-    }
-
-    if (Array.isArray(object.data)) {
-      return object.data;
-    }
-
     if (
-      object.data &&
-      typeof object.data === "object"
+      typeof value === "string" &&
+      value.trim() !== "" &&
+      Number.isFinite(Number(value))
     ) {
-      return unwrapPredictionArray(object.data);
+      return Number(value);
     }
-
-    return [];
+  }
+  return undefined;
+}
+function normalizeGlacier(item: unknown, index: number): Glacier {
+  const value =
+    item && typeof item === "object"
+      ? (item as Record<string, unknown>)
+      : {};
+  const properties =
+    value.properties && typeof value.properties === "object"
+      ? (value.properties as Record<string, unknown>)
+      : {};
+  const merged = { ...properties, ...value };
+  return {
+    rgi_id: asText(
+      merged.rgi_id,
+      merged.rgiId,
+      merged.RGIId,
+      merged.id,
+      merged.glacier_id,
+      merged.glacierId
+    ) || `result-${index}`,
+    name: asText(
+      merged.name,
+      merged.glacier_name,
+      merged.glacierName,
+      merged.NAME,
+      merged.glac_name,
+      merged.glacier
+    ) || "Unnamed glacier",
+    latitude: asNumber(
+      merged.latitude,
+      merged.lat,
+      merged.center_lat,
+      merged.cenlat
+    ),
+    longitude: asNumber(
+      merged.longitude,
+      merged.lon,
+      merged.lng,
+      merged.center_lon,
+      merged.cenlon
+    ),
+    area_km2: asNumber(
+      merged.area_km2,
+      merged.areaKm2,
+      merged.area,
+      merged.Area
+    ),
+    region: asText(merged.region, merged.region_name, merged.regionName),
+    country: asText(merged.country, merged.country_name, merged.countryName),
+    geometry: (merged.geometry ?? merged.geojson ?? merged.polygon ?? merged.boundary ?? null) as Record<string, unknown> | null,
+    raw: merged,
   };
-
-  const raw = unwrapPredictionArray(payload);
-
-  return raw
-    .filter(
-      (item: unknown) =>
-        item !== null &&
-        typeof item === "object" &&
-        Number.isFinite(
-          Number(
-            (item as Record<string, unknown>).year,
-          ),
-        ),
-    )
-    .map(
-      (item: unknown): PredictionPoint => {
-        const value =
-          item as Record<string, unknown>;
-
-        return {
-          year: Number(value.year),
-          predicted_area_km2: Number(
-            value.predicted_area_km2 ??
-              value.area_km2 ??
-              value.predicted,
-          ),
-        };
-      },
-    )
-    .filter(
-      (item: PredictionPoint) =>
-        Number.isFinite(
-          Number(item.predicted_area_km2),
-        ),
-    )
-    .sort(
-      (
-        a: PredictionPoint,
-        b: PredictionPoint,
-      ) => a.year - b.year,
-    );
 }
-
-
-/* =========================================================
-   NORMALIZE HISTORICAL RECORDS
-========================================================= */
-
-function normalizeHistoricalRecords(
-  rawRecords: unknown,
-): HistoricalPoint[] {
-  if (!Array.isArray(rawRecords)) return [];
-
-  return rawRecords
-    .filter(
-      (item: any) =>
-        Number.isFinite(Number(item?.year)) &&
-        Number.isFinite(Number(item?.area_km2)),
-    )
-    .map(
-      (item: any): HistoricalPoint => ({
-        year: Number(item.year),
-        date: String(item.date ?? ""),
-        area_km2: Number(item.area_km2),
-
-        dice:
-          item.dice != null
-            ? Number(item.dice)
-            : item.validation?.rgi_overlap_dice != null
-              ? Number(item.validation.rgi_overlap_dice)
-              : undefined,
-
-        iou:
-          item.iou != null
-            ? Number(item.iou)
-            : item.validation?.rgi_overlap_iou != null
-              ? Number(item.validation.rgi_overlap_iou)
-              : undefined,
-
-        coverage_percent:
-          item.coverage_percent != null
-            ? Number(item.coverage_percent)
-            : item.validation?.rgi_coverage_percent != null
-              ? Number(item.validation.rgi_coverage_percent)
-              : undefined,
-
-        rgi_overlap_dice:
-          item.validation?.rgi_overlap_dice != null
-            ? Number(item.validation.rgi_overlap_dice)
-            : item.rgi_overlap_dice != null
-              ? Number(item.rgi_overlap_dice)
-              : undefined,
-
-        rgi_overlap_iou:
-          item.validation?.rgi_overlap_iou != null
-            ? Number(item.validation.rgi_overlap_iou)
-            : item.rgi_overlap_iou != null
-              ? Number(item.rgi_overlap_iou)
-              : undefined,
-
-        rgi_coverage_percent:
-          item.validation?.rgi_coverage_percent != null
-            ? Number(item.validation.rgi_coverage_percent)
-            : item.rgi_coverage_percent != null
-              ? Number(item.rgi_coverage_percent)
-              : undefined,
-
-        area_difference_km2:
-          item.validation?.area_difference_km2 != null
-            ? Number(item.validation.area_difference_km2)
-            : item.area_difference_km2 != null
-              ? Number(item.area_difference_km2)
-              : undefined,
-
-        area_difference_percent:
-          item.validation?.area_difference_percent != null
-            ? Number(item.validation.area_difference_percent)
-            : item.area_difference_percent != null
-              ? Number(item.area_difference_percent)
-              : undefined,
-
-        reliability: item.reliability ?? "UNKNOWN",
-      }),
-    )
-    .sort((a, b) => a.year - b.year);
+function extractGlaciers(data: unknown): Glacier[] {
+  let items: unknown[] = [];
+  if (Array.isArray(data)) {
+    items = data;
+  } else if (data && typeof data === "object") {
+    const response = data as Record<string, unknown>;
+    for (const key of ["glaciers", "results", "items", "data"]) {
+      if (Array.isArray(response[key])) {
+        items = response[key] as unknown[];
+        break;
+      }
+    }
+  }
+  return items
+    .map(normalizeGlacier)
+    .filter((glacier) => glacier.name !== "Unnamed glacier");
 }
-
-
-/* =========================================================
-   APP
-========================================================= */
-
+type JsonRecord = Record<string, unknown>;
+function recordOf(value: unknown): JsonRecord {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as JsonRecord
+    : {};
+}
+function displayNumber(value: unknown, digits = 2): string {
+  return typeof value === "number" && Number.isFinite(value)
+    ? value.toLocaleString(undefined, { maximumFractionDigits: digits })
+    : "—";
+}
+function outputUrl(value: unknown): string {
+  if (typeof value !== "string" || !value.trim()) return "";
+  if (/^https?:\/\//i.test(value)) return value;
+  return `${API_BASE_URL}${value.startsWith("/") ? "" : "/"}${value}`;
+}
+function buildGlacierMapDocument(glacier: Glacier | null): string {
+  const isOverview = glacier === null;
+  const lat = glacier?.latitude ?? 20;
+  const lon = glacier?.longitude ?? 0;
+  const zoom = isOverview ? 2 : 9;
+  const raw = glacier?.raw ?? {};
+  const candidate =
+    (raw.geometry as Record<string, unknown> | undefined) ??
+    (raw.geojson as Record<string, unknown> | undefined) ??
+    (raw.polygon as Record<string, unknown> | undefined) ??
+    (raw.boundary as Record<string, unknown> | undefined) ??
+    ((raw.feature as Record<string, unknown> | undefined)?.geometry as Record<string, unknown> | undefined) ??
+    ((raw.rgi_geometry as Record<string, unknown> | undefined) ?? undefined);
+  const geoJson = candidate
+    ? (candidate.type === "Feature" || candidate.type === "FeatureCollection"
+        ? candidate
+        : { type: "Feature", properties: { name: glacier?.name, rgi_id: glacier?.rgi_id }, geometry: candidate })
+    : null;
+  const safeJson = JSON.stringify(geoJson).replace(/</g, "\\u003c");
+  const title = isOverview ? "Global glacier overview" : `${glacier.name} — glacier boundary`;
+  return `<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+html,body,#map{height:100%;width:100%;margin:0;font-family:Arial,sans-serif}
+.leaflet-control-layers{border-radius:10px!important}
+.map-note{background:#fff;padding:9px 12px;border-radius:8px;box-shadow:0 1px 8px #0002;font-size:12px;max-width:250px;line-height:1.4}
+.legend{display:flex;align-items:center;gap:7px}.swatch{width:20px;height:4px;background:#ffd54a;border:1px solid #183d52}
+</style></head><body><div id="map"></div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+const map=L.map('map',{zoomControl:true}).setView([${lat},${lon}],${zoom});
+const street=L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'© OpenStreetMap'});
+const imagery=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{maxZoom:19,attribution:'Tiles © Esri'});
+const terrain=L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png',{maxZoom:17,attribution:'© OpenTopoMap'});
+street.addTo(map);
+L.control.layers({'Street map':street,'Satellite imagery':imagery,'Terrain':terrain},null,{collapsed:false}).addTo(map);
+if(!${isOverview}){
+  const point=L.circleMarker([${lat},${lon}],{radius:6,color:'#ffffff',weight:2,fillColor:'#00b8a9',fillOpacity:1}).addTo(map);
+  point.bindPopup(${JSON.stringify(title)}).openPopup();
+}
+const boundaryData=${safeJson};
+if(boundaryData){
+  const boundary=L.geoJSON(boundaryData,{style:{color:'#ffd54a',weight:3,opacity:1,fillColor:'#19b9b0',fillOpacity:0.18}});
+  boundary.addTo(map);
+  const bounds=boundary.getBounds();
+  if(bounds.isValid()) map.fitBounds(bounds.pad(0.12),{maxZoom:13});
+  L.control.layers(null,{'Glacier boundary':boundary},{collapsed:true}).addTo(map);
+  const legend=L.control({position:'bottomleft'});
+  legend.onAdd=function(){const d=L.DomUtil.create('div','map-note');d.innerHTML='<div class="legend"><span class="swatch"></span><strong>RGI glacier boundary</strong></div><div style="margin-top:5px">Yellow outline · translucent glacier area</div>';return d;};
+  legend.addTo(map);
+}else{
+  const note=L.control({position:'bottomleft'});
+  note.onAdd=function(){const d=L.DomUtil.create('div','map-note');d.innerHTML=${JSON.stringify(isOverview ? '<strong>Global map</strong><br>Search the inventory above to locate a glacier. This view does not display an inventory-wide glacier layer yet.' : '<strong>Glacier location shown</strong><br>Boundary outline is unavailable because the glacier search response did not include polygon geometry. No boundary has been invented.')};return d;};
+  note.addTo(map);
+}
+</script></body></html>`;
+}
 function App() {
-
-  const [theme, setTheme] =
-    useState<Theme>("system");
-
-
-  const [selectedGlacier, setSelectedGlacier] =
-    useState<Glacier | null>(null);
-
-
-  const [glacierGeometry, setGlacierGeometry] =
-    useState<GlacierGeometry | null>(
-      null,
-    );
-
-
-  const [geometryLoading, setGeometryLoading] =
-    useState(false);
-
-
-  const [geometryError, setGeometryError] =
-    useState("");
-
-
-  const [search, setSearch] =
-    useState("");
-
-
-  const [showResults, setShowResults] =
-    useState(false);
-
-
-  const [searchResults, setSearchResults] =
-    useState<Glacier[]>([]);
-
-
-  const [searchLoading, setSearchLoading] =
-    useState(false);
-
-
-  const [searchError, setSearchError] =
-    useState("");
-
-
-  const [showThemeMenu, setShowThemeMenu] =
-    useState(false);
-
-
-  const [mobileMenu, setMobileMenu] =
-    useState(false);
-
-
-  const [activeSection, setActiveSection] =
-    useState("home");
-
-
-  const [liveAnalysis, setLiveAnalysis] =
-    useState<LiveAnalysis | null>(null);
-
-
-  const [isAnalyzing, setIsAnalyzing] =
-    useState(false);
-
-
-  const [analysisError, setAnalysisError] =
-    useState("");
-
-
-  const [historical, setHistorical] =
-    useState<HistoricalPoint[]>([]);
-
-  const [glimsReference, setGlimsReference] =
-    useState<GlimsReference | null>(null);
-
-
-  const [historicalAnalysis, setHistoricalAnalysis] =
-    useState<HistoricalAnalysisData | null>(
-      null,
-    );
-
-
-  const [changeAnalysis, setChangeAnalysis] =
-    useState<ChangeAnalysisData | null>(null);
-
-
-  const [prediction, setPrediction] =
-    useState<PredictionPoint[]>([]);
-
-
-  const [historyLoading, setHistoryLoading] =
-    useState(false);
-
-
-  const [historyError, setHistoryError] =
-    useState("");
-
-
-  const [historicalRunning, setHistoricalRunning] =
-    useState(false);
-
-
-  /*
-   * Monotonically increasing request id.
-   * Every glacier selection invalidates all older historical-analysis
-   * work so an old glacier can never overwrite the current glacier.
-   */
-  const historicalRequestIdRef = useRef(0);
-
-
-  const [reportLoading, setReportLoading] =
-    useState(false);
-
-
-  /* =======================================================
-     THEME
-  ======================================================= */
-
-  useEffect(() => {
-
-    const saved =
-      localStorage.getItem(
-        "glacier-theme",
-      ) as Theme | null;
-
-
-    if (saved) {
-      setTheme(saved);
+const [historicalResult, setHistoricalResult] =
+  useState<Record<string, unknown> | null>(null);
+const [historicalLoading, setHistoricalLoading] = useState(false);
+const [historicalError, setHistoricalError] = useState("");
+const [debrisResult, setDebrisResult] =
+  useState<Record<string, unknown> | null>(null);
+const [debrisLoading, setDebrisLoading] = useState(false);
+const [debrisError, setDebrisError] = useState("");
+const [startYear, setStartYear] = useState(2023);
+const [endYear, setEndYear] = useState(2026);
+  const [page, setPage] = useState<Page>("Overview");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
+  const [showThemeMenu, setShowThemeMenu] = useState(false);
+  // Search starts empty. No glacier is selected by default.
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<Glacier[]>([]);
+  const [selectedGlacier, setSelectedGlacier] = useState<Glacier | null>(
+    null
+  );
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [showResults, setShowResults] = useState(false);
+  const [activeSearchIndex, setActiveSearchIndex] = useState(0);
+  const [notice, setNotice] = useState("");
+  const [analysisLoading, setAnalysisLoading] = useState(false);
+  const [analysisError, setAnalysisError] = useState("");
+  const [analysisResult, setAnalysisResult] = useState<Record<string, unknown> | null>(null);
+  // Incremented whenever the user changes study glacier; prevents an older request
+  // from restoring results for the previous glacier.
+  const analysisGeneration = useRef(0);
+  function clearGlacierResults() {
+    analysisGeneration.current += 1;
+    setAnalysisResult(null);
+    setAnalysisError("");
+    setAnalysisLoading(false);
+    setHistoricalResult(null);
+    setHistoricalError("");
+    setHistoricalLoading(false);
+    setDebrisResult(null);
+    setDebrisError("");
+    setDebrisLoading(false);
+    setNotice("");
+  }
+async function runDebrisAnalysis() {
+  if (debrisLoading) return;
+  const requestGeneration = analysisGeneration.current;
+  if (!selectedGlacier) {
+    setDebrisError("Search for and select a glacier first.");
+    return;
+  }
+  setDebrisLoading(true);
+  setDebrisError("");
+  try {
+    const params = new URLSearchParams({
+      glacier: selectedGlacier.name,
+      rgi_id: selectedGlacier.rgi_id,
+    });
+    if (selectedGlacier.latitude != null) {
+      params.set("latitude", String(selectedGlacier.latitude));
     }
-
-  }, []);
-
-
+    if (selectedGlacier.longitude != null) {
+      params.set("longitude", String(selectedGlacier.longitude));
+    }
+    const response = await fetch(
+      `${API_BASE_URL}/api/debris/analyze?${params.toString()}`
+    );
+    const body: unknown = await response.json();
+    if (!response.ok) {
+      const detail =
+        body && typeof body === "object" && "detail" in body
+          ? String((body as { detail: unknown }).detail)
+          : `Debris analysis failed (${response.status})`;
+      throw new Error(detail);
+    }
+    if (requestGeneration === analysisGeneration.current) {
+      setDebrisResult(body as Record<string, unknown>);
+    }
+  } catch (error) {
+    if (requestGeneration === analysisGeneration.current) {
+      setDebrisError(
+        error instanceof Error
+          ? error.message
+          : "Debris analysis failed."
+      );
+    }
+  } finally {
+    if (requestGeneration === analysisGeneration.current) setDebrisLoading(false);
+  }
+}
+async function runHistoricalAnalysis() {
+  if (historicalLoading) return;
+  const requestGeneration = analysisGeneration.current;
+  if (!selectedGlacier) {
+    setHistoricalError("Search for and select a glacier first.");
+    return;
+  }
+  if (startYear > endYear) {
+    setHistoricalError("Start year must not exceed end year.");
+    return;
+  }
+  setHistoricalLoading(true);
+  setHistoricalError("");
+  try {
+    const response = await fetch(
+      `${API_BASE_URL}/api/historical/analyze`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: selectedGlacier.name,
+          rgi_id: selectedGlacier.rgi_id,
+          start_year: startYear,
+          end_year: endYear,
+        }),
+      }
+    );
+    const body: unknown = await response.json();
+    if (!response.ok) {
+      const detail =
+        body && typeof body === "object" && "detail" in body
+          ? String((body as { detail: unknown }).detail)
+          : `Historical analysis failed (${response.status})`;
+      throw new Error(detail);
+    }
+    if (requestGeneration === analysisGeneration.current) {
+      setHistoricalResult(body as Record<string, unknown>);
+    }
+  } catch (error) {
+    if (requestGeneration === analysisGeneration.current) {
+      setHistoricalError(
+        error instanceof Error
+          ? error.message
+          : "Historical analysis failed."
+      );
+    }
+  } finally {
+    if (requestGeneration === analysisGeneration.current) setHistoricalLoading(false);
+  }
+}
+ async function runGlacierAnalysis() {
+  if (analysisLoading) return;
+  const requestGeneration = analysisGeneration.current;
+  if (!selectedGlacier) {
+    setAnalysisError("Search for and select a glacier before starting analysis.");
+    setPage("AI Analysis");
+    return;
+  }
+  // Reuse the completed result for this glacier.
+  const currentResult = analysisResult;
+  const currentRgiId = currentResult
+    ? String(
+        (currentResult.glacier as Record<string, unknown> | undefined)?.rgi_id ?? ""
+      )
+    : "";
+  if (currentResult && currentRgiId === selectedGlacier.rgi_id) {
+    setPage("AI Analysis");
+    setSidebarOpen(false);
+    return;
+  }
+  setPage("AI Analysis");
+  setSidebarOpen(false);
+  setAnalysisLoading(true);
+  setAnalysisError("");
+  try {
+    const params = new URLSearchParams({
+      name: selectedGlacier.name,
+      rgi_id: selectedGlacier.rgi_id,
+    });
+    if (selectedGlacier.latitude != null) {
+      params.set("latitude", String(selectedGlacier.latitude));
+    }
+    if (selectedGlacier.longitude != null) {
+      params.set("longitude", String(selectedGlacier.longitude));
+    }
+    const response = await fetch(
+      `${API_BASE_URL}/api/live/analyze-live?${params.toString()}`
+    );
+    const body: unknown = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      const detail =
+        body && typeof body === "object" && "detail" in body
+          ? String((body as { detail: unknown }).detail)
+          : `Analysis failed with HTTP ${response.status}`;
+      throw new Error(detail);
+    }
+    if (requestGeneration === analysisGeneration.current) {
+      setAnalysisResult(
+        body && typeof body === "object"
+          ? (body as Record<string, unknown>)
+          : { result: body }
+      );
+    }
+  } catch (error) {
+    if (requestGeneration === analysisGeneration.current) {
+      setAnalysisError(
+        error instanceof Error
+          ? error.message
+          : "Unable to complete glacier analysis."
+      );
+    }
+  } finally {
+    if (requestGeneration === analysisGeneration.current) setAnalysisLoading(false);
+  }
+}
   useEffect(() => {
-
-    const root =
-      document.documentElement;
-
-
+    const root = document.documentElement;
+    const systemDark = window.matchMedia("(prefers-color-scheme: dark)");
+    const applyTheme = () => {
+      const resolved = theme === "system" ? (systemDark.matches ? "dark" : "light") : theme;
+      root.dataset.theme = resolved;
+      root.style.colorScheme = resolved;
+    };
+    applyTheme();
     if (theme === "system") {
-
-      root.dataset.theme =
-        window.matchMedia(
-          "(prefers-color-scheme: dark)",
-        ).matches
-          ? "dark"
-          : "light";
-
-    } else {
-
-      root.dataset.theme =
-        theme;
-
+      systemDark.addEventListener("change", applyTheme);
+      return () => systemDark.removeEventListener("change", applyTheme);
     }
-
-
-    localStorage.setItem(
-      "glacier-theme",
-      theme,
-    );
-
   }, [theme]);
-
-
-  /* =======================================================
-     GLOBAL RGI SEARCH
-  ======================================================= */
-
   useEffect(() => {
-
-    const query =
-      search.trim();
-
-
+    const query = searchQuery.trim();
+    const controller = new AbortController();
+    // A selected glacier's name stays in the input for context. Do not treat
+    // that value as a fresh search, or the dropdown reopens after selection.
+    if (
+      selectedGlacier &&
+      query.toLocaleLowerCase() === selectedGlacier.name.trim().toLocaleLowerCase()
+    ) {
+      setSearchResults([]);
+      setShowResults(false);
+      setSearchLoading(false);
+      setSearchError("");
+      return () => controller.abort();
+    }
     if (query.length < 2) {
-
       setSearchResults([]);
       setSearchLoading(false);
       setSearchError("");
-
-      return;
+      return () => controller.abort();
     }
-
-
-    const controller =
-      new AbortController();
-
-
-    const searchGlobalRGI =
-      async () => {
-
-        try {
-
-          setSearchResults([]);
-          setSearchLoading(true);
-          setSearchError("");
-
-
-          const response =
-            await fetch(
-              `${API}/api/glaciers/search?query=${encodeURIComponent(
-                query,
-              )}&limit=10`,
-              {
-                signal:
-                  controller.signal,
-              },
-            );
-
-
-          const body =
-            await response
-              .json()
-              .catch(
-                () => null,
-              );
-
-
-          if (!response.ok) {
-
-            throw new Error(
-              typeof body?.detail ===
-                "string"
-                ? body.detail
-                : `Glacier search failed with status ${response.status}`,
-            );
-
-          }
-
-
-          const data =
-            body as GlacierSearchResponse;
-
-
-          const mappedResults:
-            Glacier[] =
-            data.results.map(
-              (item) => ({
-
-                id:
-                  item.id,
-
-                name:
-                  item.name,
-
-                region:
-                  item.region,
-
-                country:
-                  item.country,
-
-                latitude:
-                  Number(
-                    item.latitude,
-                  ),
-
-                longitude:
-                  Number(
-                    item.longitude,
-                  ),
-
-                area:
-                  item.area_km2 !==
-                  null
-                    ? Number(
-                        item.area_km2,
-                      )
-                    : null,
-
-                matched_by:
-                  item.matched_by,
-
-              }),
-            );
-
-
-          setSearchResults(
-            mappedResults,
-          );
-
-        } catch (error) {
-
-          if (
-            error instanceof
-              DOMException &&
-            error.name ===
-              "AbortError"
-          ) {
-
-            return;
-
-          }
-
-
-          setSearchResults([]);
-
-
-          setSearchError(
-            error instanceof Error
-              ? error.message
-              : "Could not search the RGI glacier inventory.",
-          );
-
-        } finally {
-
-          if (
-            !controller.signal
-              .aborted
-          ) {
-
-            setSearchLoading(
-              false,
-            );
-
-          }
-
-        }
-
-      };
-
-
-    const timer =
-      window.setTimeout(
-        searchGlobalRGI,
-        300,
-      );
-
-
-    return () => {
-
-      window.clearTimeout(
-        timer,
-      );
-
-      controller.abort();
-
-    };
-
-  }, [search]);
-
-
-  /* =======================================================
-     SELECT GLACIER
-  ======================================================= */
-
-  const selectGlacier = (
-    glacier: Glacier,
-  ) => {
-
-    // Invalidate every in-flight analysis for the previously
-    // selected glacier before changing the selection.
-    historicalRequestIdRef.current += 1;
-
-    setSelectedGlacier(
-      glacier,
-    );
-
-
-    setSearch(
-      glacier.name,
-    );
-
-
-    setShowResults(
-      false,
-    );
-
-
-    setSearchResults(
-      [],
-    );
-
-
-    setGlacierGeometry(
-      null,
-    );
-
-
-    setGeometryError(
-      "",
-    );
-
-
-    setLiveAnalysis(
-      null,
-    );
-
-
-    setAnalysisError(
-      "",
-    );
-
-
-    setHistorical(
-      [],
-    );
-
-    setGlimsReference(null);
-
-    setHistoricalAnalysis(
-      null,
-    );
-
-    setChangeAnalysis(
-      null,
-    );
-
-
-    setPrediction(
-      [],
-    );
-
-
-    setHistoryError(
-      "",
-    );
-
-  };
-
-
-  /* =======================================================
-     LOAD SELECTED GLACIER RGI GEOMETRY
-  ======================================================= */
-
-  useEffect(() => {
-
-    if (!selectedGlacier) {
-
-      setGlacierGeometry(
-        null,
-      );
-
-      setGeometryError("");
-
-      return;
-    }
-
-
-    let cancelled = false;
-
-
-    const loadGlacierGeometry =
-      async () => {
-
-        setGeometryLoading(
-          true,
-        );
-
-        setGeometryError("");
-
-        setGlacierGeometry(
-          null,
-        );
-
-
-        try {
-
-          const response =
-            await fetch(
-              `${API}/api/glaciers/${encodeURIComponent(
-                selectedGlacier.id,
-              )}`,
-            );
-
-
-          const body =
-            await response
-              .json()
-              .catch(
-                () => null,
-              );
-
-
-          if (!response.ok) {
-
-            throw new Error(
-              typeof body?.detail ===
-                "string"
-                ? body.detail
-                : `Could not load glacier geometry (${response.status})`,
-            );
-
-          }
-
-
-          const data =
-            body as GlacierGeometryResponse;
-
-
-          if (
-            !data.glacier ||
-            !data.glacier.geometry
-          ) {
-
-            throw new Error(
-              "RGI geometry is not available for this glacier.",
-            );
-
-          }
-
-
-          if (!cancelled) {
-
-            setGlacierGeometry(
-              data.glacier.geometry,
-            );
-
-          }
-
-        } catch (error) {
-
-          if (!cancelled) {
-
-            setGlacierGeometry(
-              null,
-            );
-
-
-            setGeometryError(
-              error instanceof Error
-                ? error.message
-                : "Could not load RGI glacier geometry.",
-            );
-
-          }
-
-        } finally {
-
-          if (!cancelled) {
-
-            setGeometryLoading(
-              false,
-            );
-
-          }
-
-        }
-
-      };
-
-
-    loadGlacierGeometry();
-
-
-    return () => {
-
-      cancelled = true;
-
-    };
-
-  }, [selectedGlacier]);
-
-
-  /* =======================================================
-     SCROLL
-  ======================================================= */
-
-  const scrollTo = (
-    id: string,
-  ) => {
-
-    setActiveSection(
-      id,
-    );
-
-
-    setMobileMenu(
-      false,
-    );
-
-
-    if (id === "home") {
-
-      window.scrollTo({
-        top: 0,
-        behavior: "smooth",
-      });
-
-      return;
-    }
-
-
-    document
-      .getElementById(id)
-      ?.scrollIntoView({
-        behavior: "smooth",
-      });
-
-  };
-
-
-  /* =======================================================
-     LIVE AI ANALYSIS
-  ======================================================= */
-
-  const analyzeGlacier =
-    async () => {
-
-      if (!selectedGlacier) {
-
-        setAnalysisError(
-          "Please select a glacier first.",
-        );
-
-        return;
-      }
-
-
-      setIsAnalyzing(
-        true,
-      );
-
-
-      setAnalysisError(
-        "",
-      );
-
-
-      setLiveAnalysis(
-        null,
-      );
-
-
+    const timer = window.setTimeout(async () => {
+      setSearchLoading(true);
+      setSearchError("");
       try {
-
-        const params =
-          new URLSearchParams({
-
-            name:
-              selectedGlacier.name,
-
-            rgi_id:
-              selectedGlacier.id,
-
-            latitude:
-              String(
-                selectedGlacier.latitude,
-              ),
-
-            longitude:
-              String(
-                selectedGlacier.longitude,
-              ),
-
-          });
-
-
-        const response =
-          await fetch(
-            `${API}/api/live/analyze-live?${params.toString()}`,
-          );
-
-
-        const body =
-          await response
-            .json()
-            .catch(
-              () => null,
-            );
-
-
+const params = new URLSearchParams({
+  query,
+  limit: "50",
+});
+        const response = await fetch(
+          `${API_BASE_URL}/api/glaciers/search?${params.toString()}`,
+          { signal: controller.signal }
+        );
         if (!response.ok) {
-
+          const message = await response.text();
           throw new Error(
-            typeof body?.detail ===
-              "string"
-              ? body.detail
-              : `Live analysis failed with status ${response.status}`,
+            message || `Glacier search failed (${response.status})`
           );
-
         }
-
-
-        setLiveAnalysis(
-          body as LiveAnalysis,
-        );
-
-
-        setTimeout(() => {
-
-          document
-            .getElementById(
-              "analysis",
-            )
-            ?.scrollIntoView({
-              behavior:
-                "smooth",
-            });
-
-        }, 100);
-
-
+        const data: unknown = await response.json();
+        setSearchResults(extractGlaciers(data));
+        setShowResults(true);
       } catch (error) {
-
-        setAnalysisError(
-          error instanceof Error
-            ? error.message
-            : "Could not connect to GlacierAI backend.",
-        );
-
+        if (error instanceof Error && error.name !== "AbortError") {
+          setSearchError(
+            error.message.includes("Failed to fetch")
+              ? "Cannot reach the backend. Make sure FastAPI is running."
+              : error.message
+          );
+          setSearchResults([]);
+        }
       } finally {
-
-        setIsAnalyzing(
-          false,
-        );
-
-      }
-
-    };
-
-
-  /* =======================================================
-     HISTORICAL DATA
-  ======================================================= */
-
-  useEffect(() => {
-
-    if (!selectedGlacier) {
-      setHistorical([]);
-      setGlimsReference(null);
-      setHistoricalAnalysis(null);
-      setChangeAnalysis(null);
-      setPrediction([]);
-      setHistoryError("");
-      setHistoryLoading(false);
-      return;
-    }
-
-    // This effect belongs to the current glacier selection.
-    // Incrementing the id invalidates any older analysis request.
-    const requestId = ++historicalRequestIdRef.current;
-
-    const controller = new AbortController();
-
-    const loadHistorical = async () => {
-
-      const glacierName = selectedGlacier.name;
-      const rgiId = selectedGlacier.id;
-
-      // Immediately clear data belonging to the previously selected glacier.
-      setHistoryLoading(true);
-      setHistoryError("");
-      setHistorical([]);
-      setHistoricalAnalysis(null);
-      setChangeAnalysis(null);
-      setPrediction([]);
-
-      try {
-
-        const [
-          historyResponse,
-          changeResponse,
-          predictionResponse,
-        ] = await Promise.all([
-
-          fetch(
-            `${API}/api/historical?glacier=${encodeURIComponent(
-              glacierName,
-            )}&rgi_id=${encodeURIComponent(rgiId)}`,
-            {
-              signal: controller.signal,
-            },
-          ),
-
-          fetch(
-            `${API}/api/historical/change-analysis?glacier=${encodeURIComponent(
-              glacierName,
-            )}&rgi_id=${encodeURIComponent(rgiId)}`,
-            {
-              signal: controller.signal,
-            },
-          ),
-
-          fetch(
-            `${API}/api/prediction?glacier=${encodeURIComponent(
-              glacierName,
-            )}&rgi_id=${encodeURIComponent(rgiId)}`,
-            {
-              signal: controller.signal,
-            },
-          ),
-
-        ]);
-
-        if (!historyResponse.ok) {
-
-          if (historyResponse.status === 404) {
-            throw new Error(
-              `No historical analysis is available for ${glacierName} yet.`,
-            );
-          }
-
-          throw new Error(
-            `Historical API returned ${historyResponse.status}`,
-          );
-        }
-
-        const historyBody =
-          await historyResponse.json();
-
-        const glimsReference =
-          historyBody?.glims_reference ??
-          historyBody?.data?.glims_reference ??
-          null;
-
-        const changeBody =
-          changeResponse.ok
-            ? await changeResponse.json()
-            : null;
-
-        const predictionBody =
-          predictionResponse.ok
-            ? await predictionResponse.json()
-            : null;
-
-        // Ignore results if this request was cancelled because
-        // the user selected another glacier.
-        if (controller.signal.aborted) {
-          return;
-        }
-
-        const historicalData =
-          historyBody?.data ?? {};
-
-        /*
-         * Identity protection:
-         * The returned RGI ID must match the currently selected
-         * glacier before any historical data is placed in state.
-         */
-        const returnedRgiId =
-          historicalData?.glacier?.rgi_id ??
-          historyBody?.rgi_id;
-
-        if (
-          returnedRgiId &&
-          returnedRgiId !== rgiId
-        ) {
-          console.warn(
-            "GlacierAI: ignoring historical response for wrong RGI ID",
-            {
-              requested: rgiId,
-              returned: returnedRgiId,
-            },
-          );
-
-          return;
-        }
-
-        /*
-         * Current backend returns data.records.
-         * The fallback to observations/results keeps the
-         * frontend compatible with older saved responses too.
-         */
-        const rawRecords =
-          historicalData?.records ??
-          historicalData?.observations ??
-          historicalData?.results ??
-          [];
-
-        const records: HistoricalPoint[] =
-          normalizeHistoricalRecords(rawRecords);
-
-        console.log(
-          "GlacierAI historical records:",
-          {
-            glacier: glacierName,
-            rgiId,
-            records,
-          },
-        );
-
-        setHistoricalAnalysis(
-          Array.isArray(historicalData)
-            ? null
-            : (historicalData as HistoricalAnalysisData),
-        );
-
-        setGlimsReference(
-          glimsReference as GlimsReference | null,
-        );
-
-        setChangeAnalysis(
-          changeBody?.data ?? null,
-        );
-
-        setHistorical(records);
-
-        setPrediction(
-          normalizePrediction(predictionBody),
-        );
-
-      } catch (error) {
-
-        // Abort is expected when the user selects another glacier.
-        if (
-          error instanceof DOMException &&
-          error.name === "AbortError"
-        ) {
-          return;
-        }
-
         if (!controller.signal.aborted) {
-          setHistoryError(
-            error instanceof Error
-              ? error.message
-              : "Historical data could not be loaded.",
-          );
+          setSearchLoading(false);
         }
-
-      } finally {
-
-        if (!controller.signal.aborted) {
-          setHistoryLoading(false);
-        }
-
       }
-    };
-
-    loadHistorical();
-
-    // Cancel all requests for the previous glacier.
+    }, 300);
     return () => {
+      window.clearTimeout(timer);
       controller.abort();
     };
-
-  }, [selectedGlacier]);
-
-
-  /* =======================================================
-     RUN / REFRESH HISTORICAL ANALYSIS
-  ======================================================= */
-
-  const runHistoricalAnalysis = async () => {
-
-    if (!selectedGlacier) {
-      setHistoryError(
-        "Please select a glacier first.",
-      );
-      return;
-    }
-
-    /*
-     * Capture the exact glacier and request id at the moment
-     * the user starts the analysis.
-     */
-    const glacierAtStart = selectedGlacier;
-    const requestId = ++historicalRequestIdRef.current;
-    const controller = new AbortController();
-
-    const isCurrentRequest = () =>
-      !controller.signal.aborted &&
-      requestId === historicalRequestIdRef.current;
-
-    setHistoricalRunning(true);
-    setHistoryError("");
-
+  }, [searchQuery, selectedGlacier]);
+  async function selectGlacier(glacier: Glacier) {
+    if (selectedGlacier?.rgi_id !== glacier.rgi_id) clearGlacierResults();
+    // Select immediately so the UI responds to the first click. Then fetch the
+    // full inventory record, which may include the real GeoJSON boundary.
+    setSelectedGlacier(glacier);
+    setSearchQuery(glacier.name);
+    setSearchResults([]);
+    setShowResults(false);
+    setSearchError("");
+    setNotice("");
+    if (!glacier.rgi_id || glacier.rgi_id.startsWith("result-")) return;
     try {
-
       const response = await fetch(
-        `${API}/api/historical/analyze`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: glacierAtStart.name,
-            rgi_id: glacierAtStart.id,
-            start_year: 2023,
-            end_year: 2026,
-          }),
-          signal: controller.signal,
-        },
+        `${API_BASE_URL}/api/glaciers/${encodeURIComponent(glacier.rgi_id)}`
       );
-
-      if (!isCurrentRequest()) {
-        return;
-      }
-
-      const body = await response.json().catch(() => null);
-
-      if (!isCurrentRequest()) {
-        return;
-      }
-
       if (!response.ok) {
-        throw new Error(
-          typeof body?.detail === "string"
-            ? body.detail
-            : `Historical analysis failed with status ${response.status}`,
-        );
-      }
-
-      /*
-       * The POST response already contains the completed
-       * historical result. Use it immediately when available.
-       */
-      const returnedData = body?.data ?? null;
-
-      if (returnedData && isCurrentRequest()) {
-
-        const returnedRgiId =
-          returnedData?.glacier?.rgi_id ??
-          returnedData?.rgi_id;
-
-        // Never put a response for another glacier into state.
-        if (
-          returnedRgiId &&
-          returnedRgiId !== glacierAtStart.id
-        ) {
-          console.warn(
-            "GlacierAI: ignoring historical POST response for wrong RGI ID",
-            {
-              requested: glacierAtStart.id,
-              returned: returnedRgiId,
-            },
-          );
-          return;
-        }
-
-        const rawRecords =
-          returnedData.records ??
-          returnedData.observations ??
-          returnedData.results ??
-          [];
-
-        const records: HistoricalPoint[] =
-          normalizeHistoricalRecords(rawRecords);
-
-        setHistoricalAnalysis(
-          returnedData as HistoricalAnalysisData,
-        );
-
-        setGlimsReference(
-          returnedData?.glims_reference ?? null,
-        );
-
-        setHistorical(records);
-      }
-
-      /*
-       * Reload persisted historical data so the UI uses exactly
-       * what was saved by the backend.
-       */
-      const historyResponse = await fetch(
-        `${API}/api/historical?glacier=${encodeURIComponent(
-          glacierAtStart.name,
-        )}&rgi_id=${encodeURIComponent(glacierAtStart.id)}`,
-        {
-          signal: controller.signal,
-        },
-      );
-
-      if (!isCurrentRequest()) {
+        // Keep the glacier selected even if detail/geometry is unavailable.
+        console.warn(`Glacier details unavailable (${response.status}).`);
         return;
       }
-
-      if (historyResponse.ok) {
-
-        const historyBody =
-          await historyResponse.json();
-
-        if (!isCurrentRequest()) {
-          return;
-        }
-
-        const historicalData =
-          historyBody?.data ?? {};
-
-        const refreshedGlimsReference =
-          historyBody?.glims_reference ??
-          historyBody?.data?.glims_reference ??
-          null;
-
-        const returnedRgiId =
-          historicalData?.glacier?.rgi_id ??
-          historyBody?.rgi_id;
-
-        if (
-          returnedRgiId &&
-          returnedRgiId !== glacierAtStart.id
-        ) {
-          console.warn(
-            "GlacierAI: ignoring historical GET response for wrong RGI ID",
-            {
-              requested: glacierAtStart.id,
-              returned: returnedRgiId,
-            },
-          );
-          return;
-        }
-
-        const rawRecords =
-          historicalData?.records ??
-          historicalData?.observations ??
-          historicalData?.results ??
-          [];
-
-        const records: HistoricalPoint[] =
-          normalizeHistoricalRecords(rawRecords);
-
-        setHistoricalAnalysis(
-          Array.isArray(historicalData)
-            ? null
-            : (historicalData as HistoricalAnalysisData),
-        );
-
-        setGlimsReference(
-          refreshedGlimsReference as GlimsReference | null,
-        );
-
-        setHistorical(records);
-      }
-
-      const changeResponse = await fetch(
-        `${API}/api/historical/change-analysis?glacier=${encodeURIComponent(
-          glacierAtStart.name,
-        )}&rgi_id=${encodeURIComponent(glacierAtStart.id)}`,
-        {
-          signal: controller.signal,
-        },
-      );
-
-      if (!isCurrentRequest()) {
-        return;
-      }
-
-      if (changeResponse.ok) {
-
-        const changeBody =
-          await changeResponse.json();
-
-        if (!isCurrentRequest()) {
-          return;
-        }
-
-        setChangeAnalysis(
-          changeBody?.data ?? null,
-        );
-
-      } else {
-        setChangeAnalysis(null);
-      }
-
-      const predictionResponse = await fetch(
-        `${API}/api/prediction?glacier=${encodeURIComponent(
-          glacierAtStart.name,
-        )}&rgi_id=${encodeURIComponent(glacierAtStart.id)}`,
-        {
-          signal: controller.signal,
-        },
-      );
-
-      if (!isCurrentRequest()) {
-        return;
-      }
-
-      if (predictionResponse.ok) {
-
-        const predictionBody =
-          await predictionResponse.json();
-
-        if (!isCurrentRequest()) {
-          return;
-        }
-
-        setPrediction(
-          normalizePrediction(predictionBody),
-        );
-
-      } else {
-        setPrediction([]);
-      }
-
-      setHistoryError("");
-
+      const payload: unknown = await response.json();
+      const root = recordOf(payload);
+      const details = recordOf(root.glacier ?? root.data ?? root);
+      const detailProperties = recordOf(details.properties);
+      const merged = { ...glacier.raw, ...detailProperties, ...details };
+      const geometryCandidate =
+        details.geometry ??
+        detailProperties.geometry ??
+        details.geojson ??
+        details.polygon ??
+        details.boundary ??
+        details.rgi_geometry ??
+        glacier.geometry ??
+        glacier.raw.geometry ??
+        glacier.raw.geojson ??
+        glacier.raw.polygon ??
+        glacier.raw.boundary;
+      setSelectedGlacier((current) => {
+        if (!current || current.rgi_id !== glacier.rgi_id) return current;
+        return {
+          ...current,
+          latitude: asNumber(details.latitude, details.lat, details.cenlat, current.latitude),
+          longitude: asNumber(details.longitude, details.lon, details.lng, details.cenlon, current.longitude),
+          area_km2: asNumber(details.area_km2, details.area, details.Area, current.area_km2),
+          geometry: geometryCandidate && typeof geometryCandidate === "object"
+            ? geometryCandidate as Record<string, unknown>
+            : null,
+          raw: { ...merged, geometry: geometryCandidate },
+        };
+      });
     } catch (error) {
-
-      if (
-        error instanceof DOMException &&
-        error.name === "AbortError"
-      ) {
-        return;
-      }
-
-      if (isCurrentRequest()) {
-        setHistoryError(
-          error instanceof Error
-            ? error.message
-            : "Historical analysis could not be completed.",
-        );
-      }
-
-    } finally {
-
-      /*
-       * Only the active request is allowed to change loading state.
-       * A previous glacier's request cannot turn off the spinner
-       * for the current glacier.
-       */
-      if (isCurrentRequest()) {
-        setHistoricalRunning(false);
-        setHistoryLoading(false);
-      }
-
+      console.warn("Could not load glacier geometry; keeping the selected marker.", error);
     }
-  };
-
-  /* =======================================================
-     REPORT
-  ======================================================= */
-
-  const escapeReportHtml = (value: unknown) =>
-    String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-
-
-  const reportImageUrl = (path?: string | null) => {
-    if (!path) {
-      return "";
-    }
-
-    return path.startsWith("http")
-      ? path
-      : `${API}${path}`;
-  };
-
-
-  const buildReportHtml = (predictionOverride?: PredictionPoint[]) => {
-    if (!selectedGlacier) {
-      return "";
-    }
-
-    const fmt = (value: unknown, digits = 4, suffix = "") => {
-      const n = Number(value);
-      return Number.isFinite(n) ? `${n.toFixed(digits)}${suffix}` : "Not available";
-    };
-
-    const safe = (value: unknown, fallback = "Not available") => {
-      const text = String(value ?? "").trim();
-      return text ? escapeReportHtml(text) : fallback;
-    };
-
-    const historicalSorted = [...historical]
-      .filter((p) => Number.isFinite(Number(p.area_km2)) && p.year != null)
-      .sort((a, b) => Number(a.year) - Number(b.year));
-
-    const predictionSource = predictionOverride ?? prediction;
-
-    const predictionSorted = [...predictionSource]
-      .filter((p) => Number.isFinite(Number(p.predicted_area_km2 ?? p.area_km2 ?? p.predicted)) && p.year != null)
-      .sort((a, b) => Number(a.year) - Number(b.year));
-
-    const glimsRecords = [...(glimsReference?.historical_records ?? [])]
-      .filter((r) => Number.isFinite(Number(r.area_km2)) && r.year != null)
-      .sort((a, b) => Number(a.year) - Number(b.year));
-
-    const historyRows = historicalSorted
-      .map(
-        (p) =>
-          `<tr>
-            <td>${safe(p.year)}</td>
-            <td>${safe(p.date)}</td>
-            <td>${fmt(p.area_km2, 6)} km²</td>
-            <td>${p.coverage_percent != null ? fmt(p.coverage_percent, 2, "%") : "Not available"}</td>
-          </tr>`,
-      )
-      .join("");
-
-    const predictionRows = predictionSorted
-      .map(
-        (p) =>
-          `<tr>
-            <td>${safe(p.year)}</td>
-            <td>${fmt(p.predicted_area_km2 ?? p.area_km2 ?? p.predicted, 6)} km²</td>
-            <td>Trend estimate</td>
-          </tr>`,
-      )
-      .join("");
-
-    const glimsRows = glimsRecords
-      .map(
-        (r) =>
-          `<tr>
-            <td>${safe(r.year)}</td>
-            <td>${safe(r.date)}</td>
-            <td>${fmt(r.area_km2, 6)} km²</td>
-            <td>${safe(r.source)}</td>
-            <td>${safe(r.status)}</td>
-          </tr>`,
-      )
-      .join("");
-
-    const spatialRows = (changeAnalysis?.spatial_boundary_change ?? [])
-      .map(
-        (c) =>
-          `<tr>
-            <td>${safe(c.from_year)} → ${safe(c.to_year)}</td>
-            <td>${c.lost_area_km2 != null ? fmt(c.lost_area_km2, 6) + " km²" : "Not available"}</td>
-            <td>${c.gained_area_km2 != null ? fmt(c.gained_area_km2, 6) + " km²" : "Not available"}</td>
-            <td>${c.spatial_iou != null ? fmt(c.spatial_iou, 4) : "Not available"}</td>
-            <td>${safe(c.note ?? c.reason)}</td>
-          </tr>`,
-      )
-      .join("");
-
-    const changeRows = (changeAnalysis?.year_to_year_area_change ?? [])
-      .map(
-        (c) =>
-          `<tr>
-            <td>${safe(c.from_year)} → ${safe(c.to_year)}</td>
-            <td>${fmt(c.from_area_km2, 6)} km²</td>
-            <td>${fmt(c.to_area_km2, 6)} km²</td>
-            <td>${fmt(c.area_change_km2, 6)} km²</td>
-            <td>${c.percentage_change != null ? fmt(c.percentage_change, 2, "%") : "Not available"}</td>
-            <td>${safe(c.change_interpretation)}</td>
-          </tr>`,
-      )
-      .join("");
-
-    const inventoryArea =
-      selectedGlacier.area != null
-        ? `${selectedGlacier.area.toFixed(4)} km²`
-        : "Not available";
-
-    /* -------------------------------------------------------
-       INLINE SVG LINE CHARTS
-       These are embedded directly into the report so they
-       work in View Report and in the downloaded HTML file.
-    ------------------------------------------------------- */
-    const makeLineChart = (
-      title: string,
-      points: Array<{ label: string; value: number }>,
-      lineColor: string,
-      dashed = false,
-    ) => {
-      if (points.length < 2) {
-        return `<div class="chart-empty"><b>${escapeReportHtml(title)}</b><span>Not enough processed observations to draw this graph.</span></div>`;
-      }
-
-      const width = 960;
-      const height = 380;
-      const left = 72;
-      const right = 30;
-      const top = 58;
-      const bottom = 62;
-      const plotW = width - left - right;
-      const plotH = height - top - bottom;
-      const values = points.map((p) => p.value);
-      const minValue = Math.min(...values);
-      const maxValue = Math.max(...values);
-      const range = Math.max(maxValue - minValue, 1);
-      const pad = range * 0.12;
-      const yMin = Math.max(0, minValue - pad);
-      const yMax = maxValue + pad;
-
-      const x = (i: number) =>
-        left + (points.length === 1 ? plotW / 2 : (i / (points.length - 1)) * plotW);
-      const y = (v: number) =>
-        top + ((yMax - v) / (yMax - yMin)) * plotH;
-
-      const path = points
-        .map((p, i) => `${i === 0 ? "M" : "L"} ${x(i).toFixed(1)} ${y(p.value).toFixed(1)}`)
-        .join(" ");
-
-      const grid = [0, 1, 2, 3, 4].map((i) => {
-        const value = yMax - ((yMax - yMin) * i) / 4;
-        const yy = y(value);
-        return `
-          <line x1="${left}" y1="${yy}" x2="${width - right}" y2="${yy}" stroke="#dbe7ee" stroke-width="1"/>
-          <text x="${left - 12}" y="${yy + 5}" text-anchor="end" font-size="12" fill="#61758a">${value.toFixed(1)}</text>
-        `;
-      }).join("");
-
-      const labels = points.map((p, i) => `
-        <text x="${x(i)}" y="${height - 26}" text-anchor="middle" font-size="12" fill="#61758a">${escapeReportHtml(p.label)}</text>
-        <circle cx="${x(i)}" cy="${y(p.value)}" r="5" fill="${lineColor}"/>
-        <text x="${x(i)}" y="${y(p.value) - 12}" text-anchor="middle" font-size="11" font-weight="700" fill="#123b56">${p.value.toFixed(3)}</text>
-      `).join("");
-
-      return `
-        <div class="chart-card">
-          <div class="chart-title">${escapeReportHtml(title)}</div>
-          <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeReportHtml(title)}" class="report-chart">
-            <rect x="0" y="0" width="${width}" height="${height}" rx="12" fill="#fbfdff"/>
-            ${grid}
-            <line x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}" stroke="#9db3c2" stroke-width="1.2"/>
-            <line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" stroke="#9db3c2" stroke-width="1.2"/>
-            <path d="${path}" fill="none" stroke="${lineColor}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" ${dashed ? 'stroke-dasharray="10 8"' : ""}/>
-            ${labels}
-          </svg>
-          <div class="chart-caption">Area in km². Values are taken directly from the processed observations shown in this report.</div>
-        </div>
-      `;
-    };
-
-    const glimsChart = makeLineChart(
-      `${selectedGlacier.name} — GLIMS historical reference`,
-      glimsRecords.map((r) => ({ label: String(r.year), value: Number(r.area_km2) })),
-      "#58bdb0",
-    );
-
-    const combinedChart = makeLineChart(
-      `${selectedGlacier.name} — historical and future area estimates`,
-      [
-        ...historicalSorted.map((p) => ({ label: String(p.year), value: Number(p.area_km2) })),
-        ...predictionSorted.map((p) => ({ label: String(p.year), value: Number(p.predicted_area_km2 ?? p.area_km2 ?? p.predicted) })),
-      ],
-      "#0f7c86",
-    );
-
-    const live = liveAnalysis;
-    const xai = live?.analysis?.xai;
-
-    const liveImages = live
-      ? `
-        <div class="image-grid">
-          ${live.outputs.overlay ? `<figure><img src="${reportImageUrl(live.outputs.overlay)}"><figcaption>AI Segmentation Overlay</figcaption></figure>` : `<figure><div class="missing-media">Not available</div><figcaption>AI Segmentation Overlay</figcaption></figure>`}
-          ${live.outputs.mask_png ? `<figure><img src="${reportImageUrl(live.outputs.mask_png)}"><figcaption>Glacier Mask</figcaption></figure>` : `<figure><div class="missing-media">Not available</div><figcaption>Glacier Mask</figcaption></figure>`}
-          ${live.outputs.probability_heatmap ? `<figure><img src="${reportImageUrl(live.outputs.probability_heatmap)}"><figcaption>Probability Heatmap</figcaption></figure>` : `<figure><div class="missing-media">Not available</div><figcaption>Probability Heatmap</figcaption></figure>`}
-        </div>
-      `
-      : `<div class="not-available">No live AI analysis was run for this report.</div>`;
-
-    const liveBlock = live
-      ? `
-        <h2>Latest AI Analysis</h2>
-        <div class="cards">
-          <div><b>Satellite</b><span>${safe(live.satellite.source)}</span></div>
-          <div><b>Observation date</b><span>${safe(live.satellite.observation_date)}</span></div>
-          <div><b>Model</b><span>${safe(live.model.name)}</span></div>
-          <div><b>Checkpoint</b><span>${safe(live.model.checkpoint)}</span></div>
-          <div><b>Glacier pixels</b><span>${Number(live.analysis.glacier_pixels).toLocaleString()}</span></div>
-          <div><b>Coverage</b><span>${fmt(live.analysis.coverage_percent, 2, "%")}</span></div>
-          <div><b>Estimated area</b><span>${fmt(live.analysis.area_km2, 4)} km²</span></div>
-          <div><b>RGI polygon</b><span>${live.analysis.rgi_polygon_applied ? "Applied" : "Not applied"}</span></div>
-          <div><b>Resolution</b><span>${safe(live.satellite.resolution_m)} m</span></div>
-          <div><b>CRS</b><span>${safe(live.satellite.crs)}</span></div>
-          <div><b>Cloud limit</b><span>${fmt(live.satellite.cloud_limit_percent, 0, "%")}</span></div>
-          <div><b>Scene ID</b><span>${safe(live.satellite.scene_id)}</span></div>
-        </div>
-        ${liveImages}
-        ${
-          xai
-            ? `
-              <h3>Explainable AI & Uncertainty</h3>
-              <div class="cards">
-                <div><b>Mean probability</b><span>${fmt(xai.mean_probability, 4)}</span></div>
-                <div><b>Minimum probability</b><span>${fmt(xai.minimum_probability, 4)}</span></div>
-                <div><b>Maximum probability</b><span>${fmt(xai.maximum_probability, 4)}</span></div>
-                <div><b>Threshold</b><span>${fmt(xai.threshold, 2)}</span></div>
-                <div><b>Low confidence</b><span>${fmt(xai.confidence_distribution_percent.low, 2, "%")}</span></div>
-                <div><b>Uncertain</b><span>${fmt(xai.confidence_distribution_percent.uncertain, 2, "%")}</span></div>
-                <div><b>Moderate confidence</b><span>${fmt(xai.confidence_distribution_percent.moderate, 2, "%")}</span></div>
-                <div><b>High confidence</b><span>${fmt(xai.confidence_distribution_percent.high, 2, "%")}</span></div>
-              </div>
-              <p class="note"><b>Explanation:</b> ${safe(xai.explanation)}</p>
-            `
-            : `<div class="not-available">Explainable AI statistics are not available for this observation.</div>`
-        }
-      `
-      : `<div class="not-available">No live AI analysis was run for this report.</div>`;
-
-    const overall = changeAnalysis?.overall_trend;
-    const derivedStart = historicalSorted[0];
-    const derivedEnd = historicalSorted[historicalSorted.length - 1];
-    const derivedChange =
-      derivedStart && derivedEnd
-        ? Number(derivedEnd.area_km2) - Number(derivedStart.area_km2)
-        : null;
-    const derivedYears =
-      derivedStart && derivedEnd
-        ? Number(derivedEnd.year) - Number(derivedStart.year)
-        : 0;
-    const derivedAnnual =
-      derivedChange != null && derivedYears > 0
-        ? derivedChange / derivedYears
-        : null;
-
-    const changeSummary = `
-      <h2>Area & Spatial Change Summary</h2>
-      <div class="cards">
-        <div><b>Processed U-Net observations</b><span>${historicalSorted.length}</span></div>
-        <div><b>Validation status</b><span>${overall?.trend ? safe(overall.trend) : "Not independently validated"}</span></div>
-        <div><b>Start area</b><span>${overall?.start_area_km2 != null ? fmt(overall.start_area_km2) + " km²" : derivedStart ? fmt(derivedStart.area_km2) + " km²" : "Not available"}</span></div>
-        <div><b>End area</b><span>${overall?.end_area_km2 != null ? fmt(overall.end_area_km2) + " km²" : derivedEnd ? fmt(derivedEnd.area_km2) + " km²" : "Not available"}</span></div>
-        <div><b>Observed area difference</b><span>${overall?.area_change_km2 != null ? fmt(overall.area_change_km2) + " km²" : derivedChange != null ? fmt(derivedChange) + " km²" : "Not available"}</span></div>
-        <div><b>Annualized area difference</b><span>${overall?.annualized_area_change_km2_per_year != null ? fmt(overall.annualized_area_change_km2_per_year) + " km²/year" : derivedAnnual != null ? fmt(derivedAnnual) + " km²/year" : "Not available"}</span></div>
-        <div><b>Physical retreat rate</b><span>${overall?.retreat_rate_m_per_year != null ? fmt(overall.retreat_rate_m_per_year, 2, " m/year") : "Not reported — boundary validation required"}</span></div>
-        <div><b>Assessment</b><span>${overall?.trend ? safe(overall.trend) : "Area change shown; physical retreat not independently validated"}</span></div>
-      </div>
-      ${changeRows ? `<h3>Year-to-Year Area Change</h3><table><tr><th>Period</th><th>From area</th><th>To area</th><th>Change</th><th>Change %</th><th>Interpretation</th></tr>${changeRows}</table>` : `<div class="not-available">No year-to-year change records were returned.</div>`}
-      ${spatialRows ? `<h3>Spatial Mask Change</h3><table><tr><th>Period</th><th>Lost area</th><th>Gained area</th><th>Mask IoU</th><th>Note</th></tr>${spatialRows}</table>` : `<div class="not-available">No spatial mask-change records were returned.</div>`}
-      ${changeAnalysis?.scientific_note ? `<p class="note">${safe(changeAnalysis.scientific_note)}</p>` : ""}
-    `;
-
-    const glimsBlock = glimsRecords.length
-      ? `
-        <h2>GLIMS Historical Reference</h2>
-        <div class="meta">
-          <p><b>GLIMS ID:</b> ${safe(glimsReference?.glims_id)}</p>
-          <p><b>Reference records:</b> ${glimsRecords.length}</p>
-          <p><b>Layer:</b> ${safe(glimsReference?.glims_layer)}</p>
-        </div>
-        ${glimsChart}
-        <table>
-          <tr><th>Year</th><th>Observation date</th><th>GLIMS area</th><th>Source</th><th>Status</th></tr>
-          ${glimsRows}
-        </table>
-        <p class="note">GLIMS records are independent historical reference observations. They are not merged with U-Net observations because dates, sources and delineation methods can differ.</p>
-      `
-      : `<div class="not-available">No GLIMS historical reference records are available for this glacier.</div>`;
-
-    return `
-<!doctype html>
-<html>
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>GlacierAI Report - ${safe(selectedGlacier.name)}</title>
-<style>
-body{font-family:Arial,sans-serif;max-width:1100px;margin:0 auto;padding:35px 28px;color:#10243b;line-height:1.55;background:#fff}
-h1{color:#075985;margin-bottom:6px}h2{margin-top:34px;border-bottom:1px solid #d8e4ef;padding-bottom:8px;color:#123b56}h3{margin-top:24px;color:#17677d}
-table{width:100%;border-collapse:collapse;margin:14px 0 20px;font-size:14px}th,td{border:1px solid #d8e4ef;padding:9px;text-align:left;vertical-align:top}th{background:#eef7fc}
-.meta{background:#f4f9fc;padding:18px;border-radius:12px;margin:15px 0}.cards{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin:15px 0}.cards>div{border:1px solid #d8e4ef;border-radius:10px;padding:12px;background:#fbfdff;min-height:52px}.cards b{display:block;font-size:12px;color:#61758a;margin-bottom:4px}.cards span{font-weight:700;overflow-wrap:anywhere}
-.image-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin:18px 0}.image-grid figure{margin:0;border:1px solid #d8e4ef;border-radius:10px;padding:8px;background:#fbfdff}.image-grid img{display:block;width:100%;max-height:320px;object-fit:contain;background:#111;border-radius:7px}.image-grid figcaption{text-align:center;font-weight:700;padding:8px 3px;font-size:13px}.missing-media,.not-available{border:1px dashed #b8cad6;border-radius:10px;background:#f7fafc;padding:18px;color:#61758a;text-align:center;margin:12px 0}
-.chart-card{border:1px solid #d8e4ef;border-radius:12px;padding:14px;background:#fbfdff;margin:18px 0}.chart-title{font-weight:700;color:#123b56;font-size:16px;margin-bottom:8px}.report-chart{display:block;width:100%;height:auto}.chart-caption{font-size:12px;color:#61758a;margin-top:5px}
-.note{font-size:13px;color:#61758a}.footer{margin-top:40px;padding-top:18px;border-top:1px solid #d8e4ef;font-size:12px;color:#61758a}
-@media(max-width:800px){.cards,.image-grid{grid-template-columns:1fr}.image-grid img{max-height:none}}
-@media print{body{max-width:none;padding:10px}.image-grid img{max-height:260px}.cards{grid-template-columns:repeat(3,1fr)}.chart-card{break-inside:avoid}}
-</style>
-</head>
-<body>
-<h1>GlacierAI Monitoring Report</h1>
-<p><b>AI-Based Glacier Monitoring & Retreat Analysis</b></p>
-<div class="meta">
-<p><b>Glacier:</b> ${safe(selectedGlacier.name)}</p>
-<p><b>Region:</b> ${safe(selectedGlacier.region)}, ${safe(selectedGlacier.country)}</p>
-<p><b>Coordinates:</b> ${fmt(selectedGlacier.latitude, 5)}, ${fmt(selectedGlacier.longitude, 5)}</p>
-<p><b>RGI Inventory area:</b> ${inventoryArea}</p>
-<p><b>RGI ID:</b> ${safe(selectedGlacier.id)}</p>
-</div>
-
-${liveBlock}
-
-<h2>Area History & Future Projection</h2>
-${combinedChart}
-
-<h2>Historical Area Observations</h2>
-${historicalSorted.length ? `<table><tr><th>Year</th><th>Date</th><th>U-Net V3 estimated area</th><th>Coverage</th></tr>${historyRows}</table>` : `<div class="not-available">No historical U-Net observations have been processed for this glacier.</div>`}
-
-${glimsBlock}
-
-${changeSummary}
-
-<h2>Future Area Estimates</h2>
-${predictionSorted.length ? `<table><tr><th>Year</th><th>Predicted area</th><th>Estimate type</th></tr>${predictionRows}</table>` : `<div class="not-available">No future trend estimate is available for this glacier.</div>`}
-
-<p class="note">Historical values are U-Net V3 model estimates. GLIMS values are independent reference observations. Future values are trend-based estimates and are not definitive physical climate predictions. A physical terminus retreat rate is not reported unless boundary geometry supports that measurement.</p>
-<div class="footer">Generated by GlacierAI for ${safe(selectedGlacier.name)}.</div>
-</body>
-</html>`;
-  };
-
-  const fetchFreshPredictionForReport = async (): Promise<PredictionPoint[]> => {
-    if (!selectedGlacier) {
-      return prediction;
-    }
-
-    try {
-      const response = await fetch(
-        `${API}/api/prediction?glacier=${encodeURIComponent(
-          selectedGlacier.name,
-        )}&rgi_id=${encodeURIComponent(selectedGlacier.id)}`,
-      );
-
-      if (!response.ok) {
-        return prediction;
-      }
-
-      const body = await response.json();
-      const fresh = normalizePrediction(body);
-
-      return fresh.length ? fresh : prediction;
-    } catch {
-      return prediction;
-    }
-  };
-
-
-  const viewReport = async () => {
-    if (!selectedGlacier) {
-      return;
-    }
-
-    // Open immediately so Chrome does not block the report as a popup.
-    const reportWindow = window.open("", "_blank");
-
-    if (!reportWindow) {
-      window.alert("Please allow pop-ups for GlacierAI to view the report.");
-      return;
-    }
-
-    reportWindow.document.write("<p style=\"font-family:Arial;padding:30px\">Preparing GlacierAI report…</p>");
-
-    const freshPrediction = await fetchFreshPredictionForReport();
-    const html = buildReportHtml(freshPrediction);
-
-    reportWindow.document.open();
-    reportWindow.document.write(html);
-    reportWindow.document.close();
-  };
-
-
-  const generateReport = async () => {
-    if (!selectedGlacier) {
-      return;
-    }
-
-    setReportLoading(true);
-
-    try {
-      // Always refresh prediction before building the downloadable report.
-      const freshPrediction = await fetchFreshPredictionForReport();
-      const html = buildReportHtml(freshPrediction);
-      const blob = new Blob([html], { type: "text/html;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement("a");
-
-      anchor.href = url;
-      anchor.download = `${selectedGlacier.name.replace(/[^a-z0-9]+/gi, "_")}_GlacierAI_Report.html`;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-    } finally {
-      setReportLoading(false);
-    }
-  };
-
-
-  /* =======================================================
-     RENDER
-  ======================================================= */
-
-  return (
-
-    <div className="app">
-
-
-      {/* =================================================
-          HEADER
-      ================================================= */}
-
-      <header className="header">
-
-        <button
-          className="brand"
-          onClick={() =>
-            scrollTo("home")
-          }
-        >
-
-          <div className="brand-icon">
-
-            <Snowflake
-              size={21}
-            />
-
-          </div>
-
-
-          <div>
-
-            <div className="brand-name">
-              GlacierAI
-            </div>
-
-            <div className="brand-subtitle">
-              AI-Based Glacier Monitoring
-            </div>
-
-          </div>
-
-        </button>
-
-
-        <nav
-          className={
-            mobileMenu
-              ? "nav nav-open"
-              : "nav"
-          }
-        >
-
-          <button
-            onClick={() =>
-              scrollTo("home")
-            }
-            className={
-              activeSection ===
-              "home"
-                ? "active"
-                : ""
-            }
-          >
-            Home
-          </button>
-
-
-          <button
-            onClick={() =>
-              scrollTo("map")
-            }
-          >
-            Global Map
-          </button>
-
-
-          <button
-            onClick={() =>
-              scrollTo("satellite")
-            }
-          >
-            Satellite
-          </button>
-
-
-          <button
-            onClick={() =>
-              scrollTo("analysis")
-            }
-          >
-            AI Analysis
-          </button>
-
-
-          <button
-            onClick={() =>
-              scrollTo("history")
-            }
-          >
-            History
-          </button>
-
-
-          <button
-            onClick={() =>
-              scrollTo("reports")
-            }
-          >
-            Reports
-          </button>
-
-        </nav>
-
-
-        <div className="header-actions">
-
-          <div className="theme-wrapper">
-
-            <button
-              className="icon-button"
-              type="button"
-              aria-label="Choose colour theme"
-              title="Choose colour theme"
-              onClick={() =>
-                setShowThemeMenu(
-                  (v) => !v,
-                )
-              }
-            >
-
-              {theme ===
-              "dark" ? (
-                <Moon
-                  size={17}
-                />
-              ) : theme ===
-                "light" ? (
-                <Sun
-                  size={17}
-                />
-              ) : (
-                <Settings
-                  size={17}
-                />
-              )}
-
-            </button>
-
-
-            {showThemeMenu && (
-
-              <div className="theme-menu">
-
-                <button
-                  onClick={() => {
-
-                    setTheme(
-                      "light",
-                    );
-
-                    setShowThemeMenu(
-                      false,
-                    );
-
-                  }}
-                >
-                  <Sun
-                    size={15}
-                  />
-                  Light
-                </button>
-
-
-                <button
-                  onClick={() => {
-
-                    setTheme(
-                      "dark",
-                    );
-
-                    setShowThemeMenu(
-                      false,
-                    );
-
-                  }}
-                >
-                  <Moon
-                    size={15}
-                  />
-                  Dark
-                </button>
-
-
-                <button
-                  onClick={() => {
-
-                    setTheme(
-                      "system",
-                    );
-
-                    setShowThemeMenu(
-                      false,
-                    );
-
-                  }}
-                >
-                  <Settings
-                    size={15}
-                  />
-                  System
-                </button>
-
-              </div>
-
-            )}
-
-          </div>
-
-
-          <button
-            className="menu-button"
-            type="button"
-            aria-label={
-              mobileMenu
-                ? "Close navigation menu"
-                : "Open navigation menu"
-            }
-            title={
-              mobileMenu
-                ? "Close navigation menu"
-                : "Open navigation menu"
-            }
-            onClick={() =>
-              setMobileMenu(
-                (v) => !v,
-              )
-            }
-          >
-
-            {mobileMenu ? (
-              <X
-                size={18}
-              />
-            ) : (
-              <Menu
-                size={18}
-              />
-            )}
-
-          </button>
-
-        </div>
-
-      </header>
-
-
-      <main>
-
-
-        {/* =================================================
-            HERO
-        ================================================= */}
-
-        <section
-          className="hero-section"
-          id="home"
-        >
-
-          <div className="hero-content">
-
-
-            <div className="status-pill">
-
-              <span className="status-dot" />
-
-              AI Glacier Monitoring Platform
-
-            </div>
-
-
-            <h1>
-
-              Monitor the{" "}
-
-              <span>
-                Frozen Earth.
-              </span>
-
-            </h1>
-
-
-            <p className="hero-description">
-
-              GlacierAI combines
-              Sentinel-2 satellite
-              imagery, RGI 7.0
-              glacier inventory data
-              and U-Net V3 segmentation
-              to monitor glacier
-              boundaries and estimate
-              glacier-area change.
-
-            </p>
-
-
-            {/* GLOBAL SEARCH */}
-
-            <div className="search-container">
-
-              <Search
-                size={18}
-              />
-
-
-              <input
-                value={search}
-                aria-label="Search the global glacier inventory"
-
-                onKeyDown={(e) => {
-
-                  if (
-                    e.key !==
-                    "Enter"
-                  ) {
-                    return;
-                  }
-
-
-                  e.preventDefault();
-
-
-                  if (
-                    !searchLoading &&
-                    searchResults.length >
-                      0 &&
-                    search.trim()
-                      .length >=
-                      2
-                  ) {
-
-                    selectGlacier(
-                      searchResults[0],
-                    );
-
-                  }
-
-                }}
-
-
-                onChange={(e) => {
-
-                  const value =
-                    e.target.value;
-
-
-                  setSearch(
-                    value,
-                  );
-
-
-                  setShowResults(
-                    true,
-                  );
-
-
-                  setSearchResults(
-                    [],
-                  );
-
-
-                  setSearchError("");
-
-                }}
-
-
-                onFocus={() =>
-                  setShowResults(
-                    true,
-                  )
-                }
-
-
-                placeholder="Search any glacier worldwide..."
-              />
-
-
-              {search && (
-
-                <button
-                  className="icon-button"
-                  type="button"
-                  aria-label="Clear glacier search"
-                  title="Clear search"
-
-                  onClick={() => {
-
-                    setSearch("");
-
-                    setShowResults(
-                      false,
-                    );
-
-                    setSearchResults(
-                      [],
-                    );
-
-                  }}
-                >
-
-                  <X
-                    size={15}
-                  />
-
-                </button>
-
-              )}
-
-
-              <button
-                className="search-button"
-
-                onClick={() => {
-
-                  if (
-                    !searchLoading &&
-                    searchResults.length >
-                      0
-                  ) {
-
-                    selectGlacier(
-                      searchResults[0],
-                    );
-
-                  }
-
-                }}
-
-                disabled={
-                  searchLoading ||
-                  searchResults.length ===
-                    0
-                }
-              >
-
-                {searchLoading
-                  ? "Searching…"
-                  : "Search"}
-
-              </button>
-
-
-              {/* SEARCH RESULTS */}
-
-              {showResults &&
-                search.trim()
-                  .length >=
-                  2 && (
-
-                  <div className="search-results">
-
-                    {searchLoading && (
-
-                      <div className="search-result">
-
-                        <div className="result-icon">
-
-                          <Search
-                            size={16}
-                          />
-
-                        </div>
-
-
-                        <div>
-
-                          <strong>
-                            Searching RGI 7.0...
-                          </strong>
-
-                          <span>
-                            Searching the global
-                            glacier inventory
-                          </span>
-
-                        </div>
-
-                      </div>
-
-                    )}
-
-
-                    {!searchLoading &&
-                      searchResults.map(
-                        (
-                          glacier,
-                        ) => (
-
-                          <button
-                            key={
-                              glacier.id
-                            }
-                            className="search-result"
-
-                            onClick={() =>
-                              selectGlacier(
-                                glacier,
-                              )
-                            }
-                          >
-
-                            <div className="result-icon">
-
-                              <Mountain
-                                size={16}
-                              />
-
-                            </div>
-
-
-                            <div>
-
-                              <strong>
-                                {
-                                  glacier.name
-                                }
-                              </strong>
-
-
-                              <span>
-
-                                {glacier.latitude.toFixed(
-                                  4,
-                                )}
-
-                                ,{" "}
-
-                                {glacier.longitude.toFixed(
-                                  4,
-                                )}
-
-                                {glacier.area !==
-                                  null &&
-                                  ` · ${glacier.area.toFixed(
-                                    2,
-                                  )} km²`}
-
-                              </span>
-
-                            </div>
-
-
-                            <ChevronRight
-                              size={15}
-                            />
-
-                          </button>
-
-                        ),
-                      )}
-
-
-                    {!searchLoading &&
-                      searchResults.length ===
-                        0 &&
-                      !searchError && (
-
-                        <div className="search-result">
-
-                          <div className="result-icon">
-
-                            <Mountain
-                              size={16}
-                            />
-
-                          </div>
-
-
-                          <div>
-
-                            <strong>
-                              No glacier found
-                            </strong>
-
-                            <span>
-                              Try a glacier name
-                              or RGI ID
-                            </span>
-
-                          </div>
-
-                        </div>
-
-                    )}
-
-
-                    {searchError && (
-
-                      <div className="search-result">
-
-                        <div>
-
-                          <strong>
-                            Search failed
-                          </strong>
-
-                          <span>
-                            {
-                              searchError
-                            }
-                          </span>
-
-                        </div>
-
-                      </div>
-
-                    )}
-
-                  </div>
-
-                )}
-
-            </div>
-
-
-            <div
-              className="search-hint"
-              aria-live="polite"
-            >
-
-              <span>
-                Tip
-              </span>{" "}
-
-              Type at least 2 characters,
-              then choose a glacier from
-              the results.
-
-            </div>
-
-
-            <div className="hero-actions">
-
-              <button
-                className="primary-button"
-                onClick={() =>
-                  scrollTo("map")
-                }
-              >
-
-                <Globe2
-                  size={16}
-                />
-
-                Explore Global Map
-
-              </button>
-
-
-              <button
-                className="secondary-button"
-                onClick={() =>
-                  scrollTo("analysis")
-                }
-              >
-
-                View AI Analysis
-
-                <ArrowRight
-                  size={15}
-                />
-
-              </button>
-
-            </div>
-
-          </div>
-
-        </section>
-
-
-        {/* =================================================
-            SELECTED GLACIER
-        ================================================= */}
-
-        {selectedGlacier && (
-
-          <section
-            className="selected-section"
-          >
-
-            <div className="selected-card">
-
-              <div>
-
-                <div className="eyebrow">
-                  SELECTED GLACIER
-                </div>
-
-
-                <h2>
-                  {selectedGlacier.name}
-                </h2>
-
-
-                <p>
-                  {selectedGlacier.region}
-                  {" · "}
-                  {selectedGlacier.country}
-                </p>
-
-
-                <div className="selection-status">
-
-                  <span className="status-dot" />
-
-                  Ready for analysis
-
-                </div>
-
-
-                <div className="glacier-meta">
-
-                  <span>
-
-                    <Globe2
-                      size={13}
-                    />
-
-                    {selectedGlacier.latitude.toFixed(
-                      4,
-                    )}
-                    ,{" "}
-                    {selectedGlacier.longitude.toFixed(
-                      4,
-                    )}
-
-                  </span>
-
-
-                  <span>
-
-                    <Layers3
-                      size={13}
-                    />
-
-                    {selectedGlacier.area !==
-                    null
-                      ? `${selectedGlacier.area.toFixed(
-                          2,
-                        )} km² inventory`
-                      : "Area unavailable"}
-
-                  </span>
-
-
-                  <span>
-
-                    <Database
-                      size={13}
-                    />
-
-                    RGI 7.0
-
-                  </span>
-
-                </div>
-
-              </div>
-
-
-              <button
-                className="outline-button"
-                onClick={() =>
-                  scrollTo(
-                    "analysis",
-                  )
-                }
-              >
-
-                Analyse Glacier
-
-                <ArrowRight
-                  size={15}
-                />
-
-              </button>
-
-            </div>
-
-          </section>
-
-        )}
-
-
-        {/* =================================================
-            GLOBAL MAP
-        ================================================= */}
-
-        <section
-          className="section"
-          id="map"
-        >
-
-          <div className="section-heading">
-
-            <div>
-
-              <div className="eyebrow">
-                GLOBAL INVENTORY
-              </div>
-
-
-              <h2>
-                Explore Glacier Locations
-              </h2>
-
-
-              <p>
-
-                Search the global RGI 7.0
-                inventory to select any glacier
-                worldwide. Only the currently
-                selected glacier is displayed
-                on the map.
-
-              </p>
-
-            </div>
-
-
-            <div className="map-status">
-
-              <span className="status-dot" />
-
-              Global RGI 7.0 · Worldwide
-              glacier search
-
-            </div>
-
-          </div>
-
-
-          {geometryLoading &&
-            selectedGlacier && (
-
-              <div className="map-status">
-
-                <span className="status-dot" />
-
-                Loading RGI glacier boundary…
-
-              </div>
-
-            )}
-
-
-          {geometryError && (
-
-            <div className="analysis-error">
-              {geometryError}
-            </div>
-
-          )}
-
-
-          <div className="map-card">
-
-            <MapContainer
-              center={[
-                25,
-                20,
-              ]}
-              zoom={2}
-              minZoom={2}
-              maxZoom={16}
-              scrollWheelZoom
-              className="glacier-map"
-            >
-
-              <TileLayer
-                attribution="&copy; OpenStreetMap contributors"
-                url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-              />
-
-
-              {selectedGlacier && (
-
-                <RecenterMap
-                  latitude={
-                    selectedGlacier.latitude
-                  }
-
-                  longitude={
-                    selectedGlacier.longitude
-                  }
-
-                  geometry={
-                    glacierGeometry
-                  }
-                />
-
-              )}
-
-
-              {/* =================================================
-                  RGI POLYGON
-              ================================================= */}
-
-              {selectedGlacier &&
-                glacierGeometry &&
-                glacierGeometry.type ===
-                  "Polygon" && (
-
-                  <Polygon
-                    positions={polygonToLeafletPositions(
-                      glacierGeometry.coordinates,
-                    )}
-
-                    pathOptions={{
-                      color:
-                        "#075985",
-
-                      weight: 3,
-
-                      fillColor:
-                        "#55b8ff",
-
-                      fillOpacity:
-                        0.35,
-                    }}
-                  >
-
-                    <Popup>
-
-                      <strong>
-                        {
-                          selectedGlacier.name
-                        }
-                      </strong>
-
-                      <br />
-
-                      {
-                        selectedGlacier.region
-                      }
-                      ,{" "}
-                      {
-                        selectedGlacier.country
-                      }
-
-                      <br />
-                      <br />
-
-                      <span>
-
-                        RGI ID:{" "}
-                        {
-                          selectedGlacier.id
-                        }
-
-                      </span>
-
-                      <br />
-
-                      <span>
-
-                        Coordinates:{" "}
-                        {
-                          selectedGlacier.latitude.toFixed(
-                            5,
-                          )
-                        }
-                        ,{" "}
-                        {
-                          selectedGlacier.longitude.toFixed(
-                            5,
-                          )
-                        }
-
-                      </span>
-
-                      <br />
-
-                      <span>
-
-                        RGI area:{" "}
-                        {
-                          selectedGlacier.area !==
-                          null
-                            ? `${selectedGlacier.area.toFixed(
-                                4,
-                              )} km²`
-                            : "Unavailable"
-                        }
-
-                      </span>
-
-                      <br />
-                      <br />
-
-                      <button
-                        className="popup-button"
-
-                        onClick={() =>
-                          scrollTo(
-                            "analysis",
-                          )
-                        }
-                      >
-
-                        Analyse Glacier
-
-                      </button>
-
-                    </Popup>
-
-                  </Polygon>
-
-                )}
-
-
-              {/* =================================================
-                  RGI MULTI-POLYGON
-              ================================================= */}
-
-              {selectedGlacier &&
-                glacierGeometry &&
-                glacierGeometry.type ===
-                  "MultiPolygon" && (
-
-                  <>
-                    {multiPolygonToLeafletPositions(
-                      glacierGeometry.coordinates,
-                    ).map(
-                      (
-                        polygon,
-                        index,
-                      ) => (
-
-                        <Polygon
-                          key={
-                            `glacier-polygon-${index}`
-                          }
-
-                          positions={
-                            polygon
-                          }
-
-                          pathOptions={{
-                            color:
-                              "#075985",
-
-                            weight: 3,
-
-                            fillColor:
-                              "#55b8ff",
-
-                            fillOpacity:
-                              0.35,
-                          }}
-                        >
-
-                          <Popup>
-
-                            <strong>
-                              {
-                                selectedGlacier.name
-                              }
-                            </strong>
-
-                            <br />
-
-                            {
-                              selectedGlacier.region
-                            }
-                            ,{" "}
-                            {
-                              selectedGlacier.country
-                            }
-
-                            <br />
-                            <br />
-
-                            <span>
-
-                              RGI ID:{" "}
-                              {
-                                selectedGlacier.id
-                              }
-
-                            </span>
-
-                            <br />
-
-                            <span>
-
-                              Coordinates:{" "}
-                              {
-                                selectedGlacier.latitude.toFixed(
-                                  5,
-                                )
-                              }
-                              ,{" "}
-                              {
-                                selectedGlacier.longitude.toFixed(
-                                  5,
-                                )
-                              }
-
-                            </span>
-
-                            <br />
-
-                            <span>
-
-                              RGI area:{" "}
-                              {
-                                selectedGlacier.area !==
-                                null
-                                  ? `${selectedGlacier.area.toFixed(
-                                      4,
-                                    )} km²`
-                                  : "Unavailable"
-                              }
-
-                            </span>
-
-                            <br />
-                            <br />
-
-                            <button
-                              className="popup-button"
-
-                              onClick={() =>
-                                scrollTo(
-                                  "analysis",
-                                )
-                              }
-                            >
-
-                              Analyse Glacier
-
-                            </button>
-
-                          </Popup>
-
-                        </Polygon>
-
-                      ),
-                    )}
-                  </>
-
-                )}
-
-
-              {/* =================================================
-                  FALLBACK MARKER
-              ================================================= */}
-
-              {selectedGlacier &&
-                !glacierGeometry && (
-
-                  <CircleMarker
-                    center={[
-                      selectedGlacier.latitude,
-                      selectedGlacier.longitude,
-                    ]}
-
-                    radius={10}
-
-                    pathOptions={{
-                      color:
-                        "#075985",
-
-                      fillColor:
-                        "#55b8ff",
-
-                      fillOpacity:
-                        0.9,
-
-                      weight: 3,
-                    }}
-                  >
-
-                    <Popup>
-
-                      <strong>
-                        {
-                          selectedGlacier.name
-                        }
-                      </strong>
-
-                      <br />
-
-                      RGI ID:{" "}
-                      {
-                        selectedGlacier.id
-                      }
-
-                      <br />
-                      <br />
-
-                      <button
-                        className="popup-button"
-
-                        onClick={() =>
-                          scrollTo(
-                            "analysis",
-                          )
-                        }
-                      >
-
-                        Analyse Glacier
-
-                      </button>
-
-                    </Popup>
-
-                  </CircleMarker>
-
-                )}
-
-            </MapContainer>
-
-          </div>
-
-        </section>
-
-
-        {/* =================================================
-            SATELLITE
-        ================================================= */}
-
-        <section
-          className="section satellite-section"
-          id="satellite"
-        >
-
-          <div className="section-heading">
-
-            <div>
-
-              <div className="eyebrow">
-                REMOTE SENSING
-              </div>
-
-              <h2>
-                Satellite Monitoring
-              </h2>
-
-              <p>
-
-                Live analysis uses the
-                selected glacier to request
-                the latest suitable Sentinel-2
-                observation and process it
-                with U-Net V3. Historical
-                observations are shown only
-                when the backend has processed
-                data for that glacier.
-
-              </p>
-
-            </div>
-
-          </div>
-
-
-          <div className="satellite-grid">
-          </div>
-
-
-          <div className="timeline-card">
-
-            <div className="timeline-header">
-
-              <div>
-
-                <strong>
-
-                  {selectedGlacier
-                    ? `${selectedGlacier.name} observations`
-                    : "Observation coverage"}
-
-                </strong>
-
-
-                <span>
-
-                  {selectedGlacier &&
-                  historical.length
-                    ? `${historical.length} processed historical observations`
-                    : "Only processed observations are shown here."}
-
-                </span>
-
-              </div>
-
-
-              <Satellite
-                size={19}
-              />
-
-            </div>
-
-
-            {historical.length >
-            0 ? (
-
-              <div className="timeline">
-
-                <div className="timeline-line" />
-
-
-                {historical.map(
-                  (p) => (
-
-                    <div
-                      className="timeline-item"
-                      key={
-                        p.year
-                      }
-                    >
-
-                      <div className="timeline-dot" />
-
-                      <strong>
-                        {p.year}
-                      </strong>
-
-                      <span>
-                        {p.date}
-                      </span>
-
-                    </div>
-
-                  ),
-                )}
-
-              </div>
-
-            ) : (
-
-              <div className="empty-inline">
-
-                {selectedGlacier
-                  ? "No historical observations have been processed for this glacier yet."
-                  : "Select a glacier to view processed observation dates."}
-
-              </div>
-
-            )}
-
-          </div>
-
-        </section>
-
-
-        {/* =================================================
-            AI ANALYSIS
-        ================================================= */}
-
-        <section
-          className="section"
-          id="analysis"
-        >
-
-          <div className="section-heading">
-
-            <div>
-
-              <div className="eyebrow">
-                ARTIFICIAL INTELLIGENCE
-              </div>
-
-              <h2>
-                AI-Powered Glacier Analysis
-              </h2>
-
-              <p>
-
-                Run the U-Net V3 model
-                against the latest suitable
-                Sentinel-2 observation for the
-                selected glacier. The workflow
-                is automatic — you do not need
-                to upload an image.
-
-              </p>
-
-            </div>
-
-          </div>
-
-
-          <div className="analysis-upload-card">
-
-            <div className="analysis-upload-header">
-
-              <div>
-
-                <div className="eyebrow">
-                  LIVE AI ANALYSIS
-                </div>
-
-
-                <h2>
-
-                  {selectedGlacier
-                    ? `Analyse ${selectedGlacier.name}`
-                    : "Select a glacier to analyse"}
-
-                </h2>
-
-
-                <p>
-
-                  Fetch imagery and run
-                  segmentation. No upload is
-                  required.
-
-                </p>
-
-              </div>
-
-
-              <div className="analysis-model-badge">
-
-                <Snowflake
-                  size={16}
-                />
-
-                U-Net V3
-
-              </div>
-
-            </div>
-
-
-            <div className="analysis-upload-body">
-
-              <div className="live-analysis-selection">
-
-                <div>
-
-                  <span>
-                    SELECTED GLACIER
-                  </span>
-
-
-                  <strong>
-
-                    {selectedGlacier?.name ??
-                      "No glacier selected"}
-
-                  </strong>
-
-
-                  <small>
-
-                    {selectedGlacier
-                      ? `${selectedGlacier.latitude.toFixed(
-                          4,
-                        )}, ${selectedGlacier.longitude.toFixed(
-                          4,
-                        )}`
-                      : "Choose one from the search or map."}
-
-                  </small>
-
-                </div>
-
-
-                <button
-                  className="primary-button"
-
-                  disabled={
-                    !selectedGlacier ||
-                    isAnalyzing
-                  }
-
-                  onClick={
-                    analyzeGlacier
-                  }
-                >
-
-                  {isAnalyzing
-                    ? "Analysing..."
-                    : "Analyse Glacier"}
-
-
-                  {!isAnalyzing && (
-
-                    <ArrowRight
-                      size={15}
-                    />
-
-                  )}
-
-                </button>
-
-              </div>
-
-            </div>
-
-
-            {isAnalyzing && (
-
-              <div className="analysis-loading">
-
-                <span className="status-dot" />
-
-                Fetching the latest
-                Sentinel-2 imagery and
-                running U-Net V3. This can
-                take a little while…
-
-              </div>
-
-            )}
-
-
-            {analysisError && (
-
-              <div className="analysis-error">
-
-                {analysisError}
-
-              </div>
-
-            )}
-
-
-            {liveAnalysis && (
-
-              <div className="analysis-result">
-
-                <div className="result-success">
-
-                  <CheckCircle2
-                    size={16}
-                  />
-
-                  Analysis completed
-                  successfully
-
-                </div>
-
-
-                {liveAnalysis.classification && (
-
-                  <div
-                    style={{
-                      marginTop: "24px",
-                      padding: "24px",
-                      border: "1px solid rgba(0, 128, 128, 0.15)",
-                      borderRadius: "16px",
-                      background: "#f8fcfc",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "space-between",
-                        gap: "16px",
-                        flexWrap: "wrap",
-                      }}
-                    >
-                      <div>
-                        <h3
-                          style={{
-                            margin: 0,
-                            fontSize: "22px",
-                            fontWeight: 700,
-                          }}
-                        >
-                          Glacier Classification
-                        </h3>
-                        <p
-                          style={{
-                            margin: "6px 0 0",
-                            color: "#64748b",
-                          }}
-                        >
-                          CNN-based glacier type prediction
-                        </p>
-                      </div>
-
-                      <div
-                        style={{
-                          padding: "8px 12px",
-                          borderRadius: "999px",
-                          background: "#e6f4f1",
-                          color: "#0f766e",
-                          fontWeight: 700,
-                          fontSize: "13px",
-                        }}
-                      >
-                        {liveAnalysis.classification.confidence_percent != null
-                          ? `${liveAnalysis.classification.confidence_percent.toFixed(1)}% confidence`
-                          : "CNN prediction"}
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                        gap: "14px",
-                        marginTop: "20px",
-                      }}
-                    >
-                      <ResultStat
-                        label="Predicted glacier type"
-                        value={
-                          liveAnalysis.classification.display_name ??
-                          liveAnalysis.classification.class ??
-                          "Unavailable"
-                        }
-                      />
-
-                      <ResultStat
-                        label="Classifier"
-                        value={liveAnalysis.classification.source ?? "CNN prediction"}
-                      />
-
-                      <ResultStat
-                        label="RGI verification"
-                        value={
-                          liveAnalysis.classification.verification?.rgi_available
-                            ? "RGI inventory available"
-                            : "RGI inventory unavailable"
-                        }
-                      />
-                    </div>
-
-                    {liveAnalysis.classification.probabilities && (
-                      <div style={{ marginTop: "22px" }}>
-                        <h4
-                          style={{
-                            margin: "0 0 14px",
-                            fontSize: "17px",
-                            fontWeight: 700,
-                          }}
-                        >
-                          Class probabilities
-                        </h4>
-
-                        <div
-                          style={{
-                            display: "grid",
-                            gap: "10px",
-                          }}
-                        >
-                          {Object.entries(
-                            liveAnalysis.classification.probabilities,
-                          )
-                            .sort(([, a], [, b]) => Number(b) - Number(a))
-                            .map(([className, probability]) => {
-                              const displayName =
-                                className === "glacieret_snowfield"
-                                  ? "Glacieret / Snowfield"
-                                  : className === "ice_cap"
-                                    ? "Ice Cap"
-                                    : className === "mountain_glacier"
-                                      ? "Mountain Glacier"
-                                      : className;
-
-                              const percentage = Number(probability) * 100;
-
-                              return (
-                                <div key={className}>
-                                  <div
-                                    style={{
-                                      display: "flex",
-                                      justifyContent: "space-between",
-                                      gap: "12px",
-                                      marginBottom: "5px",
-                                      fontSize: "14px",
-                                    }}
-                                  >
-                                    <span>{displayName}</span>
-                                    <strong>{percentage.toFixed(1)}%</strong>
-                                  </div>
-                                  <div
-                                    style={{
-                                      height: "8px",
-                                      borderRadius: "999px",
-                                      background: "#dbe7e7",
-                                      overflow: "hidden",
-                                    }}
-                                  >
-                                    <div
-                                      style={{
-                                        width: `${Math.max(0, Math.min(100, percentage))}%`,
-                                        height: "100%",
-                                        borderRadius: "999px",
-                                        background: "#0f766e",
-                                      }}
-                                    />
-                                  </div>
-                                </div>
-                              );
-                            })}
-                        </div>
-                      </div>
-                    )}
-
-                    {liveAnalysis.classification.verification && (
-                      <div
-                        style={{
-                          marginTop: "22px",
-                          padding: "16px",
-                          borderRadius: "12px",
-                          background: "#ffffff",
-                          border: "1px solid #e2e8f0",
-                        }}
-                      >
-                        <strong>RGI inventory metadata</strong>
-                        <p
-                          style={{
-                            margin: "7px 0 0",
-                            color: "#64748b",
-                            lineHeight: 1.6,
-                          }}
-                        >
-                          {liveAnalysis.classification.verification.note ??
-                            "RGI provides inventory metadata and geometry; it is not automatically treated as ground truth for the CNN glacier-type class."}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-
-                )}
-
-
-                <div className="result-grid">
-
-                  <ResultStat
-                    label="Satellite"
-                    value={
-                      liveAnalysis
-                        .satellite
-                        .source
-                    }
-                  />
-
-
-                  <ResultStat
-                    label="Model"
-                    value={
-                      liveAnalysis
-                        .model
-                        .name
-                    }
-                  />
-
-
-                  <ResultStat
-                    label="Glacier pixels"
-                    value={
-                      liveAnalysis.analysis.glacier_pixels.toLocaleString()
-                    }
-                  />
-
-
-                  <ResultStat
-                    label="Coverage"
-                    value={`${liveAnalysis.analysis.coverage_percent.toFixed(
-                      2,
-                    )}%`}
-                  />
-
-
-                  <ResultStat
-                    label="Estimated area"
-                    value={`${liveAnalysis.analysis.area_km2.toFixed(
-                      4,
-                    )} km²`}
-                  />
-
-
-                  <ResultStat
-                    label="RGI inventory"
-                    value={
-                      liveAnalysis.glacier.rgi_area_km2 !==
-                      undefined
-                        ? `${liveAnalysis.glacier.rgi_area_km2.toFixed(
-                            4,
-                          )} km²`
-                        : "Unavailable"
-                    }
-                  />
-
-
-                  <ResultStat
-                    label="Resolution"
-                    value={`${liveAnalysis.satellite.resolution_m} m`}
-                  />
-
-
-                  <ResultStat
-                    label="CRS"
-                    value={
-                      liveAnalysis
-                        .satellite
-                        .crs
-                    }
-                  />
-
-                </div>
-
-
-                <div className="live-output-links">
-
-                  <ResultStat
-                    label="Observation date"
-                    value={
-                      liveAnalysis
-                        .satellite
-                        .observation_date
-                        ? new Date(
-                            liveAnalysis
-                              .satellite
-                              .observation_date,
-                          ).toLocaleDateString()
-                        : "Latest suitable observation"
-                    }
-                  />
-
-
-                  <ResultStat
-                    label="Cloud limit"
-                    value={`${liveAnalysis.satellite.cloud_limit_percent}%`}
-                  />
-
-
-                  <ResultStat
-                    label="RGI polygon"
-                    value={
-                      liveAnalysis.analysis
-                        .rgi_polygon_applied
-                        ? "Applied"
-                        : "Not applied"
-                    }
-                  />
-
-                </div>
-
-
-                <div
-                  style={{
-                    display:
-                      "grid",
-
-                    gridTemplateColumns:
-                      "repeat(auto-fit, minmax(260px, 1fr))",
-
-                    gap: "18px",
-
-                    marginTop:
-                      "24px",
-                  }}
-                >
-
-                  <OutputImage
-                    title="AI Segmentation Overlay"
-                    src={`${API}${liveAnalysis.outputs.overlay}`}
-                  />
-
-
-                  <OutputImage
-                    title="Glacier Mask"
-                    src={`${API}${liveAnalysis.outputs.mask_png}`}
-                  />
-
-
-                  {liveAnalysis.outputs
-                    .probability_heatmap && (
-
-                    <OutputImage
-                      title="Probability Heatmap"
-                      src={`${API}${liveAnalysis.outputs.probability_heatmap}`}
-                    />
-
-                  )}
-                  {liveAnalysis.analysis?.xai && (
-  <div
-    style={{
-      gridColumn: "1 / -1",
-      marginTop: "24px",
-      padding: "24px",
-      border: "1px solid rgba(0, 128, 128, 0.15)",
-      borderRadius: "16px",
-      background: "#f8fcfc",
-    }}
-  >
-    <h3
-      style={{
-        margin: "0 0 8px",
-        fontSize: "22px",
-        fontWeight: 700,
-      }}
-    >
-      Explainable AI
-    </h3>
-
-    <p
-      style={{
-        margin: "0 0 20px",
-        color: "#64748b",
-        lineHeight: 1.6,
-      }}
-    >
-      Pixel-level confidence produced by the U-Net V3 segmentation model.
-      Higher probability indicates stronger model confidence that a pixel
-      belongs to the glacier.
-    </p>
-
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns:
-          "repeat(auto-fit, minmax(180px, 1fr))",
-        gap: "14px",
-      }}
-    >
-      <ResultStat
-        label="Mean Probability"
-        value={liveAnalysis.analysis.xai.mean_probability.toFixed(4)}
-      />
-
-      <ResultStat
-        label="Minimum Probability"
-        value={liveAnalysis.analysis.xai.minimum_probability.toFixed(4)}
-      />
-
-      <ResultStat
-        label="Maximum Probability"
-        value={liveAnalysis.analysis.xai.maximum_probability.toFixed(4)}
-      />
-
-      <ResultStat
-        label="Segmentation Threshold"
-        value={liveAnalysis.analysis.xai.threshold.toFixed(2)}
-      />
-    </div>
-
-    <h4
-      style={{
-        margin: "24px 0 14px",
-        fontSize: "17px",
-        fontWeight: 700,
-      }}
-    >
-      Confidence Distribution
-    </h4>
-
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns:
-          "repeat(auto-fit, minmax(150px, 1fr))",
-        gap: "12px",
-      }}
-    >
-      <ResultStat
-        label="Low"
-        value={`${liveAnalysis.analysis.xai.confidence_distribution_percent.low.toFixed(2)}%`}
-      />
-
-      <ResultStat
-        label="Uncertain"
-        value={`${liveAnalysis.analysis.xai.confidence_distribution_percent.uncertain.toFixed(2)}%`}
-      />
-
-      <ResultStat
-        label="Moderate"
-        value={`${liveAnalysis.analysis.xai.confidence_distribution_percent.moderate.toFixed(2)}%`}
-      />
-
-      <ResultStat
-        label="High"
-        value={`${liveAnalysis.analysis.xai.confidence_distribution_percent.high.toFixed(2)}%`}
-      />
-    </div>
-
-    <div
-      style={{
-        marginTop: "20px",
-        padding: "14px 16px",
-        borderRadius: "10px",
-        background: "#eef8f8",
-        color: "#475569",
-        fontSize: "14px",
-        lineHeight: 1.6,
-      }}
-    >
-      {liveAnalysis.analysis.xai.explanation}
-    </div>
-  </div>
-)}
-                </div>
-
-              </div>
-
-            )}
-
-          </div>
-
-        </section>
-
-
-        {/* =================================================
-            HISTORY
-        ================================================= */}
-
-        <section
-          className="section"
-          id="history"
-        >
-
-          <div className="section-heading">
-
-            <div>
-
-              <div className="eyebrow">
-                DATA-DRIVEN CHANGE ANALYSIS
-              </div>
-
-
-              <h2>
-
-                {selectedGlacier
-                  ? `${selectedGlacier.name} — Area History`
-                  : "Glacier Area History"}
-
-              </h2>
-
-
-              <p>
-
-                {selectedGlacier
-                  ? "Only real processed observations for the selected glacier are displayed. No placeholder values are substituted."
-                  : "Select a glacier to load its processed history."}
-
-              </p>
-
-            </div>
-
-
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                gap: "12px",
-              }}
-            >
-
-              {historyLoading && (
-
-                <div className="loading-badge">
-                  Loading data…
-                </div>
-
-              )}
-
-              <button
-                className="primary-button"
-                type="button"
-                disabled={
-                  !selectedGlacier ||
-                  historicalRunning ||
-                  isAnalyzing
-                }
-                onClick={runHistoricalAnalysis}
-              >
-
-                {historicalRunning
-                  ? "Running Historical Analysis…"
-                  : "Refresh Historical Analysis"}
-
-                {!historicalRunning && (
-                  <ArrowRight size={15} />
-                )}
-
-              </button>
-
-            </div>
-
-          </div>
-
-
-          {!selectedGlacier ? (
-
-            <div className="data-empty">
-
-              <BarChart3
-                size={24}
-              />
-
-              <strong>
-                Choose a glacier to begin
-              </strong>
-
-              <span>
-
-                Search above or choose a
-                glacier. The graph will update
-                when processed data is available.
-
-              </span>
-
-            </div>
-
-          ) : historyLoading ? (
-
-            <div className="data-empty">
-
-              <BarChart3
-                size={24}
-              />
-
-              <strong>
-                Loading historical
-                analysis
-              </strong>
-
-              <span>
-
-                Reading the selected
-                glacier's processed
-                observations.
-
-              </span>
-
-            </div>
-
-          ) : historyError ? (
-
-            <div className="data-empty error-state">
-
-              <strong>
-                Historical data could
-                not be loaded
-              </strong>
-
-              <span>
-                {historyError}
-              </span>
-
-            </div>
-
-          ) : historical.length ===
-            0 && !glimsReference ? (
-
-            <div className="data-empty">
-
-              <BarChart3
-                size={24}
-              />
-
-              <strong>
-                No historical data for{" "}
-                {selectedGlacier.name}
-              </strong>
-
-              <span>
-
-                This glacier has not been
-                processed through the
-                historical U-Net pipeline
-                yet.
-
-              </span>
-
-            </div>
-
-          ) : (
-
-            <HistoryDashboard
-              historical={
-                historical
-              }
-
-              prediction={
-                prediction
-              }
-
-              analysis={
-                historicalAnalysis
-              }
-
-              changeAnalysis={
-                changeAnalysis
-              }
-
-              glimsReference={
-                glimsReference
-              }
-
-              glacierName={
-                selectedGlacier.name
-              }
-            />
-
-          )}
-
-        </section>
-
-
-        {/* =================================================
-            REPORTS
-        ================================================= */}
-
-        <section
-          className="section"
-          id="reports"
-        >
-
-          <div className="section-heading">
-
-            <div>
-
-              <div className="eyebrow">
-                DOCUMENTATION
-              </div>
-
-              <h2>
-                Monitoring Reports
-              </h2>
-
-              <p>
-
-                Export the information
-                currently available for the
-                selected glacier as a
-                self-contained HTML report.
-
-              </p>
-
-            </div>
-
-          </div>
-
-
-          <div className="report-card">
-
-            <div className="report-icon">
-
-              <FileText
-                size={23}
-              />
-
-            </div>
-
-
-            <div>
-
-              <div className="eyebrow">
-                GLACIER REPORT
-              </div>
-
-              <h2>
-
-                {selectedGlacier?.name ??
-                  "No glacier selected"}
-
-              </h2>
-
-              <p>
-
-                {selectedGlacier
-                  ? "The report uses the selected glacier, live analysis if available, and only processed historical/prediction data."
-                  : "Select a glacier first."}
-
-              </p>
-
-            </div>
-
-
-            <div style={{ display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" }}>
-
-              <button
-                className="outline-button"
-                disabled={!selectedGlacier}
-                onClick={viewReport}
-              >
-                <FileText size={15} />
-                View Report
-              </button>
-
-              <button
-                className="outline-button"
-                disabled={!selectedGlacier || reportLoading}
-                onClick={generateReport}
-              >
-                <Download size={15} />
-                {reportLoading ? "Generating..." : "Download Report"}
-              </button>
-
-            </div>
-
-          </div>
-
-        </section>
-
-      </main>
-
-
-      {/* =================================================
-          FOOTER
-      ================================================= */}
-
-      <footer>
-
-        <div className="footer-brand">
-
-          <Snowflake
-            size={14}
-          />
-
-          GlacierAI
-
-        </div>
-
-
-        <span>
-
-          AI-Based Glacier Monitoring &
-          Retreat Analysis
-
-        </span>
-
-
-        <button
-          type="button"
-          aria-label="Back to top"
-          title="Back to top"
-
-          onClick={() =>
-            window.scrollTo({
-              top: 0,
-              behavior:
-                "smooth",
-            })
-          }
-        >
-
-          ↑
-
-        </button>
-
-      </footer>
-
-    </div>
-
-  );
-}
-
-
-/* =========================================================
-   HISTORY DASHBOARD
-========================================================= */
-
-function HistoryDashboard({
-  historical,
-  prediction,
-  analysis,
-  changeAnalysis,
-  glimsReference,
-  glacierName,
-}: {
-  historical: HistoricalPoint[];
-  prediction: PredictionPoint[];
-  analysis: HistoricalAnalysisData | null;
-  changeAnalysis: ChangeAnalysisData | null;
-  glimsReference: GlimsReference | null;
-  glacierName: string;
-}) {
-
-  const allValues = [
-
-    ...historical.map(
-      (p) =>
-        p.area_km2,
-    ),
-
-    ...prediction.map(
-      (p) =>
-        Number(
-          p.predicted_area_km2,
-        ),
-    ),
-
-  ].filter(
-    Number.isFinite,
-  );
-
-
-  const min =
-    Math.min(
-      ...allValues,
-    );
-
-
-  const max =
-    Math.max(
-      ...allValues,
-    );
-
-
-  const range =
-    Math.max(
-      max - min,
-      1,
-    );
-
-
-  const width = 900;
-
-  const height = 330;
-
-  const left = 64;
-
-  const right = 28;
-
-  const top = 34;
-
-  const bottom = 54;
-
-
-  const plotWidth =
-    width -
-    left -
-    right;
-
-
-  const plotHeight =
-    height -
-    top -
-    bottom;
-
-
-  const points = [
-
-    ...historical,
-
-    ...prediction.map(
-      (p) => ({
-        year:
-          p.year,
-
-        date:
-          "",
-
-        area_km2:
-          Number(
-            p.predicted_area_km2,
-          ),
-
-      }),
-    ),
-
-  ];
-
-
-  const x = (
-    index: number,
-  ) =>
-    left +
-    (index *
-      plotWidth) /
-      Math.max(
-        points.length -
-          1,
-        1,
-      );
-
-
-  const y = (
-    value: number,
-  ) =>
-    top +
-    ((max - value) /
-      range) *
-      plotHeight;
-
-
-  const historicalPath =
-    historical
-      .map(
-        (
-          p,
-          i,
-        ) =>
-          `${x(i)},${y(
-            p.area_km2,
-          )}`,
-      )
-      .join(" ");
-
-
-  const predictionStart =
-    historical.length -
-    1;
-
-
-  const predictionPath =
-    prediction.length &&
-    historical.length
-      ? [
-
-          `${x(
-            predictionStart,
-          )},${y(
-            historical[
-              historical.length -
-                1
-            ].area_km2,
-          )}`,
-
-          ...prediction.map(
-            (
-              p,
-              i,
-            ) =>
-              `${x(
-                historical.length +
-                  i,
-              )},${y(
-                Number(
-                  p.predicted_area_km2,
-                ),
-              )}`,
-          ),
-
-        ].join(" ")
-
+  }
+  function clearGlacierSearch() {
+    clearGlacierResults();
+    setSearchQuery("");
+    setSelectedGlacier(null);
+    setSearchResults([]);
+    setSearchError("");
+    setShowResults(false);
+  }
+  function selectPage(nextPage: Page) {
+    setPage(nextPage);
+    setSidebarOpen(false);
+    setNotice("");
+  }
+  function buildReportText() {
+    const ai = recordOf(analysisResult);
+    const aiGlacier = recordOf(ai.glacier);
+    const aiAnalysis = recordOf(ai.analysis);
+    const aiSatellite = recordOf(ai.satellite);
+    const debris = recordOf(debrisResult);
+    const sentinel = recordOf(debris.sentinel);
+    const historical = recordOf(historicalResult);
+    const change = recordOf(historical.change_analysis);
+    const trend = recordOf(change.overall_trend);
+    const prediction = recordOf(historical.prediction);
+    const predictionRows = Array.isArray(prediction.predictions) ? prediction.predictions.map(recordOf) : [];
+    const observationsData = recordOf(historical.data);
+    const observations = Array.isArray(observationsData.observations) ? observationsData.observations.map(recordOf) : [];
+    return [
+      "GLACIERAI — GLACIER MONITORING REPORT",
+      `Generated: ${new Date().toLocaleString()}`,
+      `Glacier: ${selectedGlacier?.name || asText(aiGlacier.requested_name, debris.glacier, "Not selected")}`,
+      `RGI ID: ${selectedGlacier?.rgi_id || asText(aiGlacier.rgi_id, debris.rgi_id, "Unavailable")}`,
+      "",
+      "1. AI GLACIER SEGMENTATION",
+      `Status: ${analysisResult ? asText(ai.status, "Completed") : "No AI analysis in this session"}`,
+      `Estimated glacier area: ${displayNumber(asNumber(aiAnalysis.area_km2), 3)} km²`,
+      `RGI inventory area: ${displayNumber(asNumber(aiGlacier.rgi_area_km2, selectedGlacier?.area_km2), 3)} km²`,
+      `AI − RGI area difference: ${displayNumber((() => { const aiArea = asNumber(aiAnalysis.area_km2); const rgiArea = asNumber(aiGlacier.rgi_area_km2, selectedGlacier?.area_km2); return aiArea != null && rgiArea != null ? aiArea - rgiArea : undefined; })(), 3)} km²`,
+      `Coverage: ${displayNumber(asNumber(aiAnalysis.coverage_percent), 2)}%`,
+      `Glacier type: ${asText(recordOf(ai.classification).display_name, recordOf(ai.classification).class, "Unavailable")}`,
+      `Observation date: ${asText(aiSatellite.observation_date, "Unavailable")}`,
+      `Scene ID: ${asText(aiSatellite.scene_id, "Unavailable")}`,
+      "",
+      "2. DEBRIS ESTIMATION",
+      `Status: ${debrisResult ? asText(debris.status, "Completed") : "No debris analysis in this session"}`,
+      `Glacier area: ${displayNumber(asNumber(debris.glacier_area_km2), 3)} km²`,
+      `Estimated debris area: ${displayNumber(asNumber(debris.debris_area_km2), 5)} km²`,
+      `Debris percentage: ${displayNumber(asNumber(debris.debris_percentage), 3)}%`,
+      `Debris pixels: ${displayNumber(asNumber(debris.debris_pixels), 0)}`,
+      `RGB scene ID: ${asText(sentinel.rgb_scene_id, recordOf(debris.rgb_download).selected_scene_id, "Unavailable")}`,
+      `Exact scene match verified: ${sentinel.exact_scene_match_verified === true ? "Yes" : "No"}`,
+      asText(debris.scientific_note, "Debris values are spectral estimates and require independent validation."),
+      "",
+      "3. HISTORICAL AREA OBSERVATIONS",
+      ...observations.map((item) => `${asText(item.year)}: ${displayNumber(asNumber(item.area_km2), 3)} km²; date ${asText(item.date, "unavailable")}; scene ${asText(item.scene_id, "unavailable")}`),
+      `Retreat trend status: ${asText(trend.status, "Not calculated")}`,
+      asText(trend.note, "Historical area estimates require quality validation before retreat conclusions."),
+      "",
+      "4. FUTURE AREA ESTIMATES",
+      ...predictionRows.map((item) => `${asText(item.year)}: ${displayNumber(asNumber(item.predicted_area_km2), 3)} km²`),
+      asText(prediction.note, "No prediction available. Predictions are not physical climate forecasts."),
+      "",
+      "SCIENTIFIC LIMITATION",
+      "Model-estimated area and debris are not automatically validated measurements. Do not interpret unvalidated differences as physical glacier retreat.",
+    ].join("\n");
+  }
+  function buildReportHtml() {
+    const report = buildReportText();
+    const ai = recordOf(analysisResult);
+    const outputs = recordOf(ai.outputs);
+    const imageItems = [
+      ["AI segmentation overlay", outputs.overlay],
+      ["Glacier mask", outputs.mask_png],
+      ["Probability heatmap", outputs.probability_heatmap],
+      ["Probability overlay", outputs.probability_overlay],
+      ["RGI reference mask", outputs.rgi_mask],
+    ].filter((item) => typeof item[1] === "string" && item[1]);
+    const photos = imageItems.length
+      ? `<div class="photos">${imageItems.map(([label, path]) => `<figure><img src="${outputUrl(path)}" alt="${String(label)}" onerror="this.style.display='none';this.nextElementSibling.style.display='block'"><div class="missing" style="display:none">Image unavailable</div><figcaption>${String(label)}</figcaption></figure>`).join("")}</div>`
+      : `<p class="note">No AI output photos are available in the current analysis result.</p>`;
+    const selected = selectedGlacier;
+    const profile = selected
+      ? `<section><h2>Glacier profile and location</h2><div class="grid">
+          <div><span>Glacier</span><strong>${selected.name}</strong></div>
+          <div><span>RGI ID</span><strong>${selected.rgi_id}</strong></div>
+          <div><span>Region</span><strong>${selected.region || selected.country || "Unavailable"}</strong></div>
+          <div><span>Coordinates</span><strong>${selected.latitude != null && selected.longitude != null ? `${selected.latitude.toFixed(5)}, ${selected.longitude.toFixed(5)}` : "Unavailable"}</strong></div>
+          <div><span>Inventory area</span><strong>${displayNumber(selected.area_km2, 3)} km²</strong></div>
+        </div></section>`
       : "";
-
-
-  const first =
-    historical[0]
-      ?.area_km2;
-
-
-  const last =
-    historical[
-      historical.length -
-        1
-    ]?.area_km2;
-
-
-  const change =
-    first !== undefined &&
-    last !== undefined
-      ? last - first
-      : 0;
-
-  return (
-
-    <div className="history-dashboard">
-
-
-      {(historical.length > 0 || prediction.length > 0) && (
-      <div className="history-chart-card">
-
-        <div className="chart-header">
-
-          <div>
-
-            <strong>
-              Historical Glacier Area
-            </strong>
-
-            <span>
-
-              U-Net V3 historical estimates
-              for{" "}
-              {glacierName}
-
-            </span>
-
-          </div>
-
-
-          <BarChart3
-            size={18}
+    const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+    const lines = report.split("\n");
+    const reportSections: { title: string; lines: string[] }[] = [];
+    let current: { title: string; lines: string[] } | null = null;
+    for (const line of lines) {
+      if (/^\d+\. /.test(line) || line === "SCIENTIFIC LIMITATION") {
+        current = { title: line.replace(/^\d+\. /, ""), lines: [] };
+        reportSections.push(current);
+      } else if (current && line.trim()) current.lines.push(line);
+    }
+    const sectionsHtml = reportSections.map((section) => {
+      const isLimit = section.title === "SCIENTIFIC LIMITATION";
+      const rows = section.lines.map((line) => {
+        const split = line.indexOf(":");
+        if (split > 0 && split < 70) return `<div class="metric"><span>${escapeHtml(line.slice(0, split))}</span><strong>${escapeHtml(line.slice(split + 1).trim())}</strong></div>`;
+        return `<p class="detail">${escapeHtml(line)}</p>`;
+      }).join("");
+      return `<section class="${isLimit ? "limitation" : ""}"><h2>${escapeHtml(section.title)}</h2><div class="metrics">${rows}</div></section>`;
+    }).join("");
+    return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+      <title>GlacierAI Monitoring Report</title><style>
+      *{box-sizing:border-box}body{margin:0;background:#edf3f6;color:#19364a;font:15px/1.6 Arial,sans-serif}
+      main{max-width:1000px;margin:28px auto;padding:0 20px 36px}.hero{padding:28px;border-radius:16px;background:linear-gradient(135deg,#12344a,#087e8b);color:white}
+      .eyebrow{font-size:12px;letter-spacing:2px;text-transform:uppercase;opacity:.85}.hero h1{margin:8px 0;font-size:30px}.hero p{margin:5px 0}
+      .actions{display:flex;gap:10px;margin:16px 0}.actions button{border:0;border-radius:8px;padding:10px 16px;background:#087e8b;color:white;cursor:pointer}
+      section{margin:16px 0;padding:22px;border-radius:14px;background:white;box-shadow:0 2px 12px #12344a0b}h2{margin:0 0 14px;font-size:20px}
+      .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}.grid>div{padding:12px;border:1px solid #e0e9ee;border-radius:9px}
+      .grid span{display:block;color:#637a88;font-size:12px}.grid strong{display:block;overflow-wrap:anywhere}
+      .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:10px}.metric{padding:12px;border:1px solid #e0e9ee;border-radius:9px;min-width:0}.metric span{display:block;color:#637a88;font-size:12px;margin-bottom:4px}.metric strong{display:block;overflow-wrap:anywhere;font-weight:600}.detail{grid-column:1/-1;margin:0;padding:12px;background:#f4f8fa;border-radius:8px;overflow-wrap:anywhere}
+      .limitation{border:1px solid #e6c36a;background:#fffaf0}.photos{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:14px}
+      figure{margin:0;border:1px solid #dce7ec;border-radius:10px;overflow:hidden;background:#f7fafb}figure img{display:block;width:100%;height:auto;min-height:120px;object-fit:contain}figcaption{padding:10px;font-weight:600}
+      .note{color:#637a88;font-size:13px}.footer{padding:18px;text-align:center;color:#637a88;font-size:12px}
+      @media(max-width:600px){main{padding:0 10px 24px;margin:10px auto}.hero{padding:20px}.hero h1{font-size:24px}}
+      @media print{body{background:white}main{max-width:none;margin:0;padding:0}.actions{display:none}section,.hero,figure{box-shadow:none;break-inside:avoid}.hero{border-radius:0}.photos figure{break-inside:avoid}}
+      </style></head><body><main><header class="hero"><div class="eyebrow">GlacierAI · Earth observation</div><h1>Glacier Monitoring Report</h1><p>Generated ${new Date().toLocaleString()}</p><p>Model estimates are shown separately from validated measurements.</p></header>
+      <div class="actions"><button onclick="window.print()">Print / Save as PDF</button></div>
+      ${profile}
+      ${sectionsHtml}
+      <section><h2>AI output images</h2>${photos}</section>
+      <div class="footer">Model-estimated results require validation before being interpreted as measured glacier retreat.</div>
+      </main></body></html>`;
+  }
+  function downloadReport() {
+    const html = buildReportHtml();
+    const url = URL.createObjectURL(new Blob([html], { type: "text/html;charset=utf-8" }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "GlacierAI-monitoring-report.html";
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  function viewReport() {
+    const reportWindow = window.open("", "_blank");
+    if (!reportWindow) {
+      setNotice("Allow pop-ups to view the report, or use Export instead.");
+      return;
+    }
+    reportWindow.document.open();
+    reportWindow.document.write(buildReportHtml());
+    reportWindow.document.close();
+  }
+  const descriptions: Record<Page, string> = {
+    Overview: "A clear view of glacier monitoring activity.",
+    "Global Map": "Search and select glaciers from the global inventory.",
+    "AI Analysis": "Prepare a selected glacier for image analysis.",
+    History: "Compare historical observations with future glacier-area projections. Forecasts are estimates, not validated retreat measurements.",
+    Debris: "Explore debris-covered glacier monitoring.",
+    Reports: "Export a workspace report.",
+  };
+  function GlacierSearch() {
+    return (
+      <div className="search-wrapper">
+        <label className="field-label" htmlFor="glacier-search">
+          SEARCH GLOBAL GLACIER INVENTORY
+        </label>
+        <div className="search-control">
+        <div className="search-input-wrap">
+          <Search size={19} className="search-input-icon" />
+          <input
+            id="glacier-search"
+            className="form-control glacier-search-input"
+            type="text"
+            value={searchQuery}
+            autoComplete="off"
+            spellCheck={false}
+            placeholder="Start typing a glacier name, region or RGI ID..."
+            role="combobox"
+            aria-label="Search the global glacier inventory by glacier name, region or RGI ID"
+            aria-autocomplete="list"
+            aria-expanded={showResults && (searchResults.length > 0 || searchLoading)}
+            aria-controls="glacier-search-results"
+            aria-activedescendant={showResults && searchResults[activeSearchIndex] ? `glacier-option-${activeSearchIndex}` : undefined}
+            aria-busy={searchLoading}
+            onFocus={() => {
+              if (searchQuery.trim().length >= 2 && !selectedGlacier) setShowResults(true);
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "ArrowDown" && searchResults.length > 0) {
+                event.preventDefault();
+                setShowResults(true);
+                setActiveSearchIndex((index) => (index + 1) % searchResults.length);
+              } else if (event.key === "ArrowUp" && searchResults.length > 0) {
+                event.preventDefault();
+                setActiveSearchIndex((index) => (index - 1 + searchResults.length) % searchResults.length);
+              } else if (event.key === "Enter" && showResults && searchResults[activeSearchIndex]) {
+                event.preventDefault();
+                void selectGlacier(searchResults[activeSearchIndex]);
+              } else if (event.key === "Escape") {
+                setShowResults(false);
+              }
+            }}
+            onChange={(event) => {
+              const nextQuery = event.target.value;
+              if (nextQuery !== searchQuery) clearGlacierResults();
+              setSearchQuery(nextQuery);
+              setSelectedGlacier(null);
+              setActiveSearchIndex(0);
+              setShowResults(true);
+            }}
           />
-
-        </div>
-
-
-        <div className="chart-wrap">
-
-          <svg
-            viewBox={`0 0 ${width} ${height}`}
-            className="area-chart"
-            role="img"
-            aria-label={`Historical glacier area for ${glacierName}`}
-          >
-
-            {[0, 0.25, 0.5, 0.75, 1].map(
-              (ratio) => {
-
-                const value =
-                  max -
-                  ratio *
-                    range;
-
-
-                const yy =
-                  top +
-                  ratio *
-                    plotHeight;
-
-
-                return (
-
-                  <g
-                    key={
-                      ratio
-                    }
-                  >
-
-                    <line
-                      x1={
-                        left
-                      }
-
-                      x2={
-                        width -
-                        right
-                      }
-
-                      y1={
-                        yy
-                      }
-
-                      y2={
-                        yy
-                      }
-
-                      className="grid-line"
-                    />
-
-
-                    <text
-                      x={
-                        left -
-                        10
-                      }
-
-                      y={
-                        yy +
-                        4
-                      }
-
-                      textAnchor="end"
-
-                      className="axis-label"
-                    >
-
-                      {value.toFixed(
-                        1,
-                      )}
-
-                    </text>
-
-                  </g>
-
-                );
-
-              },
-            )}
-
-
-            {historicalPath && (
-
-              <polyline
-                points={
-                  historicalPath
-                }
-
-                className="history-line"
-              />
-
-            )}
-
-
-            {predictionPath && (
-
-              <polyline
-                points={
-                  predictionPath
-                }
-
-                className="prediction-line"
-              />
-
-            )}
-
-
-            {points.map(
-              (
-                p,
-                i,
-              ) => (
-
-                <g
-                  key={`${p.year}-${i}`}
-                >
-
-                  <circle
-                    cx={x(i)}
-                    cy={y(
-                      p.area_km2,
-                    )}
-                    r="5"
-
-                    className={
-                      i <
-                      historical.length
-                        ? "history-point"
-                        : "prediction-point"
-                    }
-                  />
-
-
-                  <text
-                    x={x(i)}
-
-                    y={
-                      height -
-                      25
-                    }
-
-                    textAnchor="middle"
-
-                    className="axis-label"
-                  >
-
-                    {p.year}
-
-                  </text>
-
-                </g>
-
-              ),
-            )}
-
-          </svg>
-
-        </div>
-
-
-        <div className="chart-legend">
-
-          <span>
-
-            <i className="legend-history" />
-
-            Historical U-Net V3
-
-          </span>
-
-
-          {prediction.length >
-            0 && (
-
-            <span>
-
-              <i className="legend-prediction" />
-
-              Future trend estimate
-
-            </span>
-
+          {searchLoading && (
+            <LoaderCircle className="search-spinner" size={19} />
           )}
-
+          {searchQuery && (
+            <button
+              type="button"
+              className="icon-button search-clear"
+              aria-label="Clear search"
+              onClick={clearGlacierSearch}
+            >
+              <X size={17} />
+            </button>
+          )}
         </div>
-
-      </div>
-      )}
-
-
-      {glimsReference?.success &&
-        (glimsReference.historical_records?.length ?? 0) > 0 && (
-        <div className="history-table-card">
-          <div className="chart-header">
-            <div>
-              <strong>GLIMS Historical Reference</strong>
-              <span>
-                Independent historical glacier-outline records associated
-                with this RGI glacier
-              </span>
-            </div>
-            <Database size={18} />
-          </div>
-
-          <div className="metric-row">
-            <MetricCard
-              label="GLIMS ID"
-              value={glimsReference.glims_id ?? "—"}
-            />
-            <MetricCard
-              label="Reference records"
-              value={`${glimsReference.historical_records?.length ?? 0}`}
-            />
-            <MetricCard
-              label="GLIMS layer"
-              value={glimsReference.glims_layer ?? "GLIMS"}
-            />
-          </div>
-
-          <div className="history-table">
-            <div className="history-row">
-              <strong>Year</strong>
-              <strong>Observation date</strong>
-              <strong>GLIMS area</strong>
-              <strong>Source</strong>
-            </div>
-
-            {glimsReference.historical_records?.map((record, index) => (
-              <div
-                className="history-row"
-                key={`${record.glims_id ?? "glims"}-${record.date ?? index}`}
+        {showResults && (searchLoading || searchResults.length > 0) && (
+          <div className="glacier-search-results" id="glacier-search-results" role="listbox" aria-label="Matching glaciers">
+            {searchLoading && searchResults.length === 0 && (
+              <div className="search-dropdown-status"><LoaderCircle size={16} className="search-spinner-inline" /> Searching the global glacier inventory...</div>
+            )}
+            {searchResults.map((glacier, index) => (
+              <button
+                type="button"
+                key={glacier.rgi_id}
+                id={`glacier-option-${index}`}
+                className={`glacier-result ${activeSearchIndex === index ? "active-result" : ""}`}
+                role="option"
+                aria-selected={activeSearchIndex === index}
+                onMouseEnter={() => setActiveSearchIndex(index)}
+                onClick={() => void selectGlacier(glacier)}
               >
-                <span>{record.year ?? "—"}</span>
-                <span>
-                  {record.date
-                    ? new Date(record.date).toLocaleDateString()
-                    : "—"}
+                <span className="result-icon">
+                  <Mountain size={19} />
                 </span>
-                <span>
-                  {record.area_km2 != null
-                    ? `${Number(record.area_km2).toFixed(4)} km²`
-                    : "—"}
+                <span className="result-info">
+                  <strong>{glacier.name}</strong>
+                  <small>
+                    {glacier.region ||
+                      glacier.country ||
+                      glacier.rgi_id}
+                  </small>
+                  <small className="result-rgi">
+                    RGI ID: {glacier.rgi_id}
+                  </small>
                 </span>
-                <span>{record.source ?? "—"}</span>
-              </div>
+                <ChevronRight size={17} />
+              </button>
             ))}
           </div>
-
-          <p className="history-note">
-            GLIMS records are shown as an independent historical reference.
-            They are not merged with the U-Net observations because the
-            observations can come from different dates, sources and
-            delineation methods.
-          </p>
-        </div>
-      )}
-
-      {(analysis?.overall_observed_change ||
-        (changeAnalysis?.spatial_boundary_change &&
-          changeAnalysis.spatial_boundary_change.length > 0)) && (
-
-        <div className="history-table-card">
-
-          <div className="chart-header">
-
-            <div>
-
-              <strong>
-                Area &amp; Spatial Change Summary
-              </strong>
-
-              <span>
-                Historical U-Net V3 estimates and year-to-year mask changes
-              </span>
-
-            </div>
-
-          </div>
-
-
-          {analysis?.overall_observed_change && (
-
-            <div className="metric-row">
-
-              <MetricCard
-                label={`${analysis.overall_observed_change.start_year} Area`}
-                value={`${analysis.overall_observed_change.start_area_km2.toFixed(
-                  4,
-                )} km²`}
-              />
-
-              <MetricCard
-                label={`${analysis.overall_observed_change.end_year} Area`}
-                value={`${analysis.overall_observed_change.end_area_km2.toFixed(
-                  4,
-                )} km²`}
-              />
-
-              <MetricCard
-                label="Observed area change"
-                value={`${analysis.overall_observed_change.total_change_km2 >= 0
-                  ? "+"
-                  : ""}${analysis.overall_observed_change.total_change_km2.toFixed(
-                  4,
-                )} km²`}
-              />
-
-              <MetricCard
-                label="Area change rate"
-                value={
-                  analysis.overall_observed_change
-                    .annualized_change_km2_per_year !== null
-                    ? `${analysis.overall_observed_change
-                        .annualized_change_km2_per_year >= 0
-                        ? "+"
-                        : ""}${analysis.overall_observed_change
-                        .annualized_change_km2_per_year.toFixed(
-                        4,
-                      )} km²/year`
-                    : "—"
-                }
-              />
-
-            </div>
-
-          )}
-
-
-          <p className="history-note">
-
-            Historical areas are U-Net V3 model estimates. Independent
-            historical glacier boundaries are not available in the current
-            pipeline, so these observations are not independently validated.
-            Terminus retreat rate in m/year is not reported.
-
-          </p>
-
-
-          {changeAnalysis?.spatial_boundary_change &&
-            changeAnalysis.spatial_boundary_change.length > 0 && (
-
-              <>
-
-                <div
-                  className="chart-header"
-                  style={{ marginTop: "18px" }}
-                >
-
-                  <div>
-
-                    <strong>
-                      Spatial Mask Change
-                    </strong>
-
-                    <span>
-                      Pixel-mask differences between consecutive historical observations
-                    </span>
-
-                  </div>
-
-                </div>
-
-
-                <div className="history-table">
-
-                  <div className="history-row">
-
-                    <strong>Period</strong>
-                    <strong>Lost area</strong>
-                    <strong>Gained area</strong>
-                    <strong>Mask IoU</strong>
-
-                  </div>
-
-
-                  {changeAnalysis.spatial_boundary_change.map((change) => (
-
-                    <div
-                      className="history-row"
-                      key={`spatial-${change.from_year}-${change.to_year}`}
-                    >
-
-                      <span>
-                        {change.from_year} → {change.to_year}
-                      </span>
-
-                      <span>
-                        {change.lost_area_km2?.toFixed(4) ?? "—"} km²
-                      </span>
-
-                      <span>
-                        {change.gained_area_km2?.toFixed(4) ?? "—"} km²
-                      </span>
-
-                      <strong>
-                        {change.spatial_iou != null
-                          ? change.spatial_iou.toFixed(4)
-                          : "—"}
-                      </strong>
-
-                    </div>
-
-                  ))}
-
-                </div>
-
-
-                <p className="history-note">
-
-                  Mask IoU describes spatial overlap between consecutive
-                  U-Net V3 masks. It is not independent model validation
-                  and should not be interpreted as a physical retreat rate.
-
-                </p>
-
-              </>
-
-            )}
-
-        </div>
-
-      )}
-
-
-      {historical.length > 0 && (
-      <>
-      <div className="metric-row">
-
-        <MetricCard
-          label={`${historical[0].year} Area`}
-          value={`${first?.toFixed(
-            4,
-          )} km²`}
-        />
-
-
-        <MetricCard
-          label={`${historical[historical.length - 1].year} Area`}
-          value={`${last?.toFixed(
-            4,
-          )} km²`}
-        />
-
-
-        <MetricCard
-          label="Observed change"
-          value={`${
-            change >=
-            0
-              ? "+"
-              : ""
-          }${change.toFixed(
-            4,
-          )} km²`}
-        />
-
-
-        {prediction.length >
-          0 && (
-
-          <MetricCard
-            label={`${prediction[0].year}–${prediction[prediction.length - 1].year} trend`}
-            value={`${(
-              Number(
-                prediction[
-                  prediction.length -
-                    1
-                ]
-                  .predicted_area_km2,
-              ) -
-              Number(
-                prediction[0]
-                  .predicted_area_km2,
-              )
-            ).toFixed(
-              4,
-            )} km²`}
-          />
-
         )}
-
-      </div>
-
-
-      <div className="metric-row">
-
-        <MetricCard
-          label="Processed observations"
-          value={`${historical.length}`}
-        />
-
-        <MetricCard
-          label="Validation status"
-          value="Not independently validated"
-        />
-
-      </div>
-
-
-      <div className="history-table-card">
-
-        <div className="chart-header">
-
-          <div>
-
-            <strong>
-              Historical observations
-            </strong>
-
-            <span>
-              Processed dates and
-              model-estimated area
-            </span>
-
-          </div>
-
         </div>
-
-
-        <div className="history-table">
-
-          <div className="history-row">
-
-            <strong>Year</strong>
-            <strong>Observation date</strong>
-            <strong>U-Net V3 estimated area</strong>
-            <strong>Validation</strong>
-
-          </div>
-
-
-          {historical.map(
-            (p) => (
-
-              <div
-                className="history-row"
-                key={p.year}
-              >
-
-                <span>
-                  {p.year}
-                </span>
-
-                <span>
-                  {p.date
-                    ? new Date(p.date).toLocaleDateString()
-                    : "—"}
-                </span>
-
-                <span>
-                  {p.area_km2.toFixed(4)} km²
-                </span>
-
-                <strong>
-                  Not independently validated
-                </strong>
-
-              </div>
-
-            ),
-          )}
-
-        </div>
-
-      </div>
-      </>
-
-      )}
-
-      {prediction.length >
-        0 && (
-
-        <div className="history-table-card">
-
-          <div className="chart-header">
-
-            <div>
-
-              <strong>
-                Future area estimates
-              </strong>
-
-              <span>
-
-                Trend-based estimates
-                from the available
-                historical observations
-
-              </span>
-
-            </div>
-
-          </div>
-
-
-          <div className="history-table">
-
-            <div className="history-row">
-
-              <strong>Year</strong>
-              <strong>Predicted area</strong>
-              <strong>Estimate type</strong>
-
-            </div>
-
-
-            {prediction.map(
-              (p) => (
-
-                <div
-                  className="history-row"
-                  key={p.year}
-                >
-
-                  <span>
-                    {p.year}
-                  </span>
-
-                  <span>
-                    {Number(p.predicted_area_km2).toFixed(4)} km²
-                  </span>
-
-                  <strong>
-                    Trend estimate
-                  </strong>
-
-                </div>
-
-              ),
-            )}
-
-          </div>
-
-
-          <p className="history-note">
-
-            These are trend-based estimates from the available
-            historical U-Net V3 area estimates, not definitive
-            physical climate predictions.
-
+        {!selectedGlacier && searchQuery.trim().length === 0 && (
+          <p className="search-help">
+            Enter at least two characters to search the glacier inventory.
           </p>
-
-        </div>
-
-      )}
-
+        )}
+        {searchError && (
+          <div className="search-message search-error" role="alert">
+            {searchError}
+          </div>
+        )}
+        {showResults &&
+  searchQuery.trim().length >= 2 &&
+  !searchLoading &&
+  !searchError &&
+  searchResults.length === 0 &&
+  !(
+    selectedGlacier &&
+    selectedGlacier.name.toLowerCase() === searchQuery.trim().toLowerCase()
+  ) && (
+    <div className="search-message">
+      No matching glaciers found. Try another name.
     </div>
+  )}
 
-  );
-}
-
-
-/* =========================================================
-   OUTPUT IMAGE
-========================================================= */
-
-function OutputImage({
-  title,
-  src,
-}: {
-  title: string;
-  src: string;
-}) {
-
-  return (
-
-    <div
-      style={{
-        border:
-          "1px solid var(--border-color, #d8e4ef)",
-
-        borderRadius:
-          "14px",
-
-        overflow:
-          "hidden",
-
-        background:
-          "var(--card-bg, #ffffff)",
-      }}
-    >
-
-      <div
-        style={{
-          padding:
-            "12px 14px",
-
-          fontWeight:
-            600,
-        }}
-      >
-
-        {title}
-
+        {selectedGlacier && (
+          <div className="selected-glacier">
+            <div className="selected-glacier-icon">
+              <CircleCheck size={20} />
+            </div>
+            <div className="selected-glacier-info">
+              <strong>{selectedGlacier.name}</strong>
+              <span>RGI ID: {selectedGlacier.rgi_id}</span>
+              {selectedGlacier.latitude != null &&
+                selectedGlacier.longitude != null && (
+                  <span>
+                    {selectedGlacier.latitude.toFixed(5)},{" "}
+                    {selectedGlacier.longitude.toFixed(5)}
+                  </span>
+                )}
+              {selectedGlacier.area_km2 != null && (
+                <span>
+                  Inventory area: {selectedGlacier.area_km2.toFixed(3)} km²
+                </span>
+              )}
+            </div>
+            <button
+              type="button"
+              className="secondary-button"
+              onClick={runGlacierAnalysis}
+            >
+              Analyze <ArrowUpRight size={15} />
+            </button>
+          </div>
+        )}
       </div>
-
-
-      <a
-        href={src}
-        target="_blank"
-        rel="noreferrer"
-      >
-
-        <img
-          src={src}
-          alt={title}
-
-          style={{
-            display:
-              "block",
-
-            width:
-              "100%",
-
-            height:
-              "220px",
-
-            objectFit:
-              "contain",
-
-            background:
-              "#eef4f8",
-          }}
+    );
+  }
+  return (
+    <div className="app-shell">
+      {sidebarOpen && (
+        <button
+          className="mobile-shade"
+          aria-label="Close navigation"
+          onClick={() => setSidebarOpen(false)}
         />
-
-      </a>
-
+      )}
+      <aside className={`sidebar ${sidebarOpen ? "sidebar-open" : ""}`}>
+        <div className="brand">
+          <button type="button" className="brand-home" aria-label="Go to GlacierAI home" title="Go to home" onClick={() => selectPage("Overview")}>
+          <div className="brand-icon">
+            <Snowflake size={25} />
+          </div>
+          <div>
+            <strong>
+              Glacier<span>AI</span>
+            </strong>
+            <small>EARTH OBSERVATION</small>
+          </div>
+          </button>
+          <button
+            className="icon-button sidebar-close"
+            aria-label="Close navigation"
+            onClick={() => setSidebarOpen(false)}
+          >
+            <X size={19} />
+          </button>
+        </div>
+        <div className="workspace-label">WORKSPACE</div>
+        <nav className="nav-list">
+          {navigation.map(({ label, icon: Icon }) => (
+            <button
+              key={label}
+              className={`nav-link ${page === label ? "active" : ""}`}
+              aria-current={page === label ? "page" : undefined}
+              onClick={() => selectPage(label)}
+            >
+              <Icon size={19} />
+              <span>{label}</span>
+              {page === label && (
+                <ChevronRight className="nav-chevron" size={16} />
+              )}
+            </button>
+          ))}
+        </nav>
+      </aside>
+      <a className="skip-link" href="#main-content">Skip to content</a>
+      <main className="main-area" id="main-content" tabIndex={-1}>
+        <header className="topbar">
+          <div className="topbar-left">
+            <button
+              className="icon-button menu-button"
+              aria-label="Open navigation"
+              onClick={() => setSidebarOpen(true)}
+            >
+              <Menu size={22} />
+            </button>
+            <div className="breadcrumb">
+              Workspace <span>/</span> <strong>{page}</strong>
+            </div>
+          </div>
+          <div className="topbar-actions">
+            <div className="theme-wrapper" style={{ position: "relative" }}>
+              <button className="icon-button" type="button" aria-label="Change theme" title="Change theme" onClick={() => setShowThemeMenu((v) => !v)}>
+                {theme === "dark" ? <Moon size={19} /> : theme === "light" ? <Sun size={19} /> : <Monitor size={19} />}
+              </button>
+              {showThemeMenu && <div className="theme-menu" style={{ position: "absolute", right: 0, top: "calc(100% + 8px)", zIndex: 1000, background: "var(--panel, #fff)", border: "1px solid var(--border, #dce7ec)", borderRadius: 12, padding: 8, minWidth: 160, boxShadow: "0 12px 32px #102a4325" }}>
+                {([{value:"light",label:"Light",icon:Sun},{value:"dark",label:"Dark",icon:Moon},{value:"system",label:"System",icon:Monitor}] as const).map((item) => <button key={item.value} type="button" className="theme-option" onClick={() => { setTheme(item.value); setShowThemeMenu(false); }} style={{ display:"flex",alignItems:"center",gap:9,width:"100%",padding:"9px 10px",border:0,borderRadius:8,background:theme===item.value?"var(--soft, #edf5f8)":"transparent",color:"var(--text, #19364a)",cursor:"pointer",textAlign:"left" }}><item.icon size={16}/>{item.label}{theme===item.value ? " ✓" : ""}</button>)}
+              </div>}
+            </div>
+          </div>
+        </header>
+        <div className="page-content">
+          <section className="welcome-row">
+            <div>
+              <div className="eyebrow">
+                <span className="eyebrow-line" />
+                GLACIER MONITORING PLATFORM
+              </div>
+              <h1>
+                {page === "Overview" ? (
+                  <>
+                    Monitor the <span>frozen Earth.</span>
+                  </>
+                ) : (
+                  page
+                )}
+              </h1>
+              <p className="page-subtitle">{descriptions[page]}</p>
+            </div>
+            {page !== "Overview" && page !== "AI Analysis" && (
+              <button
+                className="primary-button"
+                onClick={() => selectPage("AI Analysis")}
+              >
+                <ScanSearch size={17} /> New analysis
+              </button>
+            )}
+          </section>
+          {notice && (
+            <div className="notice">
+              <span>{notice}</span>
+              <button
+                onClick={() => setNotice("")}
+                aria-label="Dismiss notification"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          )}
+          {page === "Overview" && (
+            <>
+              <section className="hero-panel">
+                <div className="hero-copy">
+                  <span className="hero-tag">
+                    <Snowflake size={14} /> CRYOSPHERE INTELLIGENCE
+                  </span>
+                  <h2>
+                    Understand change.
+                    <br />
+                    <span>Protect what remains.</span>
+                  </h2>
+                  <p>
+                    Explore glacier inventory records, satellite imagery
+                    and AI-assisted glacier monitoring in one workspace.
+                  </p>
+                  <div className="hero-actions">
+                    <button
+                      className="hero-button"
+                      onClick={() => selectPage("AI Analysis")}
+                    >
+                      Start AI analysis <ArrowUpRight size={16} />
+                    </button>
+                  </div>
+                </div>
+                <div className="hero-art" aria-hidden="true">
+                  <div className="orbit orbit-one" />
+                  <div className="orbit orbit-two" />
+                  <div className="mountain mountain-back" />
+                  <div className="mountain mountain-front" />
+                  <div className="mountain-snow snow-back" />
+                  <div className="mountain-snow snow-front" />
+                  <div className="art-sun" />
+                  <div className="art-star star-one">✳</div>
+                  <div className="art-star star-two">✳</div>
+                  <div className="art-caption">
+                    <MapPin size={13} /> GLOBAL OBSERVATION
+                  </div>
+                </div>
+              </section>
+              <div className="section-heading lower-heading">
+                <div>
+                  <h2>Find a glacier</h2>
+                  <p>Search the global RGI inventory.</p>
+                </div>
+              </div>
+              <section className="content-card">
+                {GlacierSearch()}
+              </section>
+            </>
+          )}
+          {page === "Global Map" && (
+            <section className="content-card">
+              <div className="card-heading">
+                <div>
+                  <h2>Global glacier map</h2>
+                  <p>Explore the world map, then search the global glacier inventory to zoom to a selected glacier.</p>
+                </div>
+                <Globe2 size={22} />
+              </div>
+              {GlacierSearch()}
+              <div className="real-map-shell" style={{ marginTop: "20px" }}>
+                <iframe
+                  title={selectedGlacier ? `Interactive map for ${selectedGlacier.name}` : "Interactive global glacier map"}
+                  className="real-glacier-map"
+                  width="100%"
+                  height="520"
+                  loading="lazy"
+                  style={{ border: 0, display: "block" }}
+                  srcDoc={buildGlacierMapDocument(selectedGlacier)}
+                />
+              </div>
+              <div className="map-info-row" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "10px", padding: "4px 2px 0" }}>
+                <div>
+                  <strong>{selectedGlacier ? selectedGlacier.name : "Global overview"}</strong>
+                  <p style={{ margin: "5px 0 0", fontSize: "12px" }}>
+                    {selectedGlacier && selectedGlacier.latitude != null && selectedGlacier.longitude != null
+                      ? `Coordinates: ${selectedGlacier.latitude.toFixed(4)}, ${selectedGlacier.longitude.toFixed(4)}`
+                      : selectedGlacier
+                        ? "This inventory record has no coordinates; the map remains at global view."
+                        : "Pan and zoom the map. Search above to locate a glacier with recorded coordinates."}
+                  </p>
+                </div>
+                {selectedGlacier && selectedGlacier.latitude != null && selectedGlacier.longitude != null && (
+                  <a
+                    href={`https://www.openstreetmap.org/?mlat=${selectedGlacier.latitude}&mlon=${selectedGlacier.longitude}#map=9/${selectedGlacier.latitude}/${selectedGlacier.longitude}`}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open larger map ↗
+                  </a>
+                )}
+              </div>
+              <p className="scientific-note" style={{ marginTop: "14px", borderRadius: "8px" }}>
+                The base map is for geographic context. Glacier markers and boundaries are shown only when supported by inventory data returned by the backend.
+              </p>
+            </section>
+          )}
+          {page === "AI Analysis" && (
+            <section className="content-card">
+              <div className="card-heading">
+                <div>
+                  <h2>Glacier image analysis</h2>
+                  <p>
+                    Search and select a glacier before proceeding.
+                  </p>
+                </div>
+                <ScanSearch size={22} />
+              </div>
+              {GlacierSearch()}
+              {selectedGlacier && (
+                <div className="data-note">
+                </div>
+              )}
+              {analysisLoading && (
+                <div className="analysis-progress" role="status" aria-live="polite">
+  <LoaderCircle className="analysis-spinner" size={22} />
+  <div className="analysis-progress-content">
+    <p className="analysis-progress-title">
+      Analysis in progress
+    </p>
+    <p className="analysis-progress-description">
+      Downloading satellite imagery and running glacier segmentation.
+      This can take several minutes.
+    </p>
+  </div>
+</div>
+              )}
+              {analysisError && (
+                <div className="analysis-error" role="alert">
+                  <strong>Analysis failed</strong>
+                  <p>{analysisError}</p>
+                  <button className="secondary-button" type="button" onClick={runGlacierAnalysis} disabled={analysisLoading || !selectedGlacier}>Try again</button>
+                </div>
+              )}
+              {analysisResult && (() => {
+                const classification = recordOf(analysisResult.classification);
+                const glacier = recordOf(analysisResult.glacier);
+                const satellite = recordOf(analysisResult.satellite);
+                const model = recordOf(analysisResult.model);
+                const analysis = recordOf(analysisResult.analysis);
+                const outputs = recordOf(analysisResult.outputs);
+                const aiAreaKm2 = asNumber(analysis.area_km2);
+                const rgiAreaKm2 = asNumber(
+                  glacier.rgi_area_km2,
+                  selectedGlacier?.area_km2
+                );
+                const areaDifferenceKm2 =
+                  aiAreaKm2 != null && rgiAreaKm2 != null
+                    ? aiAreaKm2 - rgiAreaKm2
+                    : undefined;
+                const areaDifferencePercent =
+                  areaDifferenceKm2 != null && rgiAreaKm2 != null && rgiAreaKm2 > 0
+                    ? (areaDifferenceKm2 / rgiAreaKm2) * 100
+                    : undefined;
+                const images = [
+                  { key: "mask_png", title: "Glacier mask", description: "Binary segmentation result" },
+                  { key: "overlay", title: "Final mask preview", description: "Binary segmentation output; not a satellite composite" },
+                  { key: "probability_heatmap", title: "Probability heatmap", description: "Pixel-level glacier probability" },
+                  { key: "probability_overlay", title: "Probability overlay", description: "Confidence mapped over imagery" },
+                  { key: "rgi_mask", title: "RGI reference mask", description: "Inventory geometry used for analysis" },
+                ].map((item) => ({ ...item, src: outputUrl(outputs[item.key]) })).filter((item) => item.src);
+                return (
+                  <div className="analysis-results">
+                    <div className="results-title">
+                      <div>
+                        <h3>{asText(glacier.requested_name, selectedGlacier?.name, "Glacier analysis")}</h3>
+                        <p>{asText(analysisResult.status, "Analysis response received")} · {asText(satellite.source, "Satellite source unavailable")} · {asText(model.name, "Model unavailable")}</p>
+                      </div>
+                      <span
+                        className="success-pill"
+                        role="status"
+                        style={{
+                          background: analysis.complete === true ? undefined : "#fff3cd",
+                          color: analysis.complete === true ? undefined : "#805b00",
+                        }}
+                      >
+                        {analysis.complete === true
+                          ? "All tiles processed — validation needed"
+                          : "Partial result — validation needed"}
+                      </span>
+                    </div>
+                    <div className="analysis-metrics-grid">
+                      <article className="analysis-metric">
+                        <span>AI-estimated area</span>
+                        <strong>{displayNumber(analysis.area_km2)} km²</strong>
+                        <small>From current segmentation</small>
+                      </article>
+                      <article className="analysis-metric">
+                        <span>RGI inventory area</span>
+                        <strong>
+                          {displayNumber(
+                            asNumber(glacier.rgi_area_km2, selectedGlacier?.area_km2)
+                          )} km²
+                        </strong>
+                        <small>Reference area from glacier inventory</small>
+                      </article>
+                      <article className="analysis-metric">
+                        <span>Area difference</span>
+                        <strong>
+                          {areaDifferenceKm2 == null
+                            ? "—"
+                            : `${areaDifferenceKm2 > 0 ? "+" : ""}${displayNumber(areaDifferenceKm2, 3)} km²`}
+                        </strong>
+                        <small>AI estimate minus RGI reference</small>
+                      </article>
+                      <article className="analysis-metric">
+                        <span>Percentage difference</span>
+                        <strong>
+                          {areaDifferencePercent == null
+                            ? "—"
+                            : `${areaDifferencePercent > 0 ? "+" : ""}${displayNumber(areaDifferencePercent, 2)}%`}
+                        </strong>
+                        <small>Relative to RGI inventory area</small>
+                      </article>
+                      <article className="analysis-metric">
+                        <span>Glacier coverage</span>
+                        <strong>{displayNumber(analysis.coverage_percent, 1)}%</strong>
+                        <small>Of analyzed pixels</small>
+                      </article>
+                      <article className="analysis-metric">
+                        <span>Glacier type</span>
+                        <strong>{asText(classification.display_name, classification.class, "—")}</strong>
+                        <small>{asText(classification.confidence_level, "Confidence")} confidence</small>
+                      </article>
+                      <article className="analysis-metric">
+                        <span>Type confidence</span>
+                        <strong>{displayNumber(classification.confidence_percent)}%</strong>
+                        <small>{asText(classification.source, "Classification model")}</small>
+                      </article>
+                    </div>
+                    <div className="analysis-inline-note" role="note" style={{ marginTop: "12px" }}>
+                      {analysis.complete === true
+                        ? "The difference compares the AI-estimated area with the RGI inventory reference. It is not proof of glacier growth or retreat because the inventory and satellite observation may represent different dates, and the model estimate needs independent validation."
+                        : "This analysis is incomplete, so the AI-estimated area and its difference from the RGI reference may be underestimated. Wait for all tiles to finish and validate the boundary before drawing conclusions."}
+                    </div>
+                    <div className="analysis-section">
+                      <div className="analysis-section-heading">
+                        <div><h4>Segmentation outputs</h4><p>Generated files returned by your backend.</p></div>
+                        <span>{images.length} images</span>
+                      </div>
+                      {images.length > 0 ? (
+                        <div className="ai-image-grid">
+                          {images.map((item) => (
+                            <figure className="ai-image-card" key={item.key}>
+                              <a href={item.src} target="_blank" rel="noreferrer" aria-label={`Open ${item.title} image`}>
+                                <img src={item.src} alt={item.title} loading="lazy" />
+                              </a>
+                              <figcaption><strong>{item.title}</strong><span>{item.description}</span></figcaption>
+                            </figure>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="analysis-inline-note">The backend returned no displayable image paths for this analysis.</div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}{!analysisLoading && !analysisError && !analysisResult && (
+                <div className="empty-state">
+                  <div className="empty-icon">
+                    <ScanSearch size={25} />
+                  </div>
+                  <h3>Ready for image analysis</h3>
+                <p>
+                  Select a glacier above and run analysis. Results from the connected backend will appear here, including segmentation outputs and estimated glacier type.
+                </p>
+              </div>
+              )}
+            </section>
+          )}
+          {page === "History" && (
+            <section className="content-card">
+              <div className="card-heading">
+                <div>
+                  <h2>Historical observations</h2>
+                  <p>
+                    Verified observation dates and measured glacier
+                    changes.
+                  </p>
+                </div>
+                <History size={22} />
+              </div>
+              {GlacierSearch()}
+              <div className="history-controls" style={{ display: "flex", flexWrap: "wrap", alignItems: "end", gap: "12px", marginTop: "20px" }}>
+                <label className="field-label">
+                  START YEAR
+                  <select className="form-control" value={startYear} onChange={(event) => setStartYear(Number(event.target.value))} style={{ display: "block", minWidth: "130px", marginTop: "6px" }}>
+                    {Array.from({ length: 27 }, (_, i) => 2000 + i).map((year) => <option key={year} value={year}>{year}</option>)}
+                  </select>
+                </label>
+                <label className="field-label">
+                  END YEAR
+                  <select className="form-control" value={endYear} onChange={(event) => setEndYear(Number(event.target.value))} style={{ display: "block", minWidth: "130px", marginTop: "6px" }}>
+                    {Array.from({ length: 27 }, (_, i) => 2000 + i).map((year) => <option key={year} value={year}>{year}</option>)}
+                  </select>
+                </label>
+                <button className="primary-button" type="button" onClick={runHistoricalAnalysis} disabled={historicalLoading || !selectedGlacier}>
+                  {historicalLoading ? <><LoaderCircle className="analysis-spinner" size={17} /> Running analysis…</> : <>Run historical analysis <ArrowUpRight size={16} /></>}
+                </button>
+              </div>
+              {!selectedGlacier && <p className="search-help">Search above and select a glacier before running historical analysis.</p>}
+              {historicalError && <div className="analysis-error" role="alert"><strong>Historical analysis failed</strong><p>{historicalError}</p></div>}
+              {historicalLoading && <div className="analysis-progress" role="status"><LoaderCircle className="analysis-spinner" size={22} /><div><p className="analysis-progress-title">Historical analysis in progress</p><p className="analysis-progress-description">Loading historical observations, change analysis and future prediction. This may take several minutes.</p></div></div>}
+              {historicalResult && (
+                <div className="analysis-results" style={{ marginTop: "22px" }}>
+                  <div className="results-title"><div><h3>{asText(recordOf(historicalResult.glacier).name, selectedGlacier?.name, "Historical analysis")}</h3><p>{startYear}–{endYear} · {asText(historicalResult.status, "Response received")}</p></div><span className="success-pill"><CircleCheck size={14} /> Results received</span></div>
+                  {(["data", "change_analysis", "prediction", "glims_reference"] as const).map((key) => {
+                    const value = historicalResult[key];
+                    if (value == null) return null;
+                    return <section className="analysis-detail-card" key={key} style={{ marginTop: "14px" }}>
+                      <h4>{({ data: "Historical observations", change_analysis: "Change analysis", prediction: "Future prediction", glims_reference: "GLIMS reference" } as Record<string, string>)[key]}</h4>
+                      {key === "data" ? (() => {
+                        const dataRecord = recordOf(value);
+                        const observations = Array.isArray(dataRecord.observations) ? dataRecord.observations.map(recordOf) : [];
+                        const usable = observations.map((item) => ({
+                          year: asNumber(item.year),
+                          area: asNumber(item.area_km2),
+                          date: asText(item.date),
+                          scene: asText(item.scene_id),
+                        })).filter((item) => item.year != null && item.area != null);
+                        const historicalPoints = usable.map((item) => ({ year: item.year as number, area: item.area as number }));
+                        const predictionRoot = recordOf(historicalResult?.prediction);
+                        const predictionData = recordOf(predictionRoot.data);
+                        const predictionStatus = asText(predictionData.status, predictionRoot.status, "unknown").toUpperCase();
+                        const forecastSource = Array.isArray(predictionData.predictions)
+                          ? predictionData.predictions
+                          : Array.isArray(predictionRoot.predictions)
+                            ? predictionRoot.predictions
+                            : [];
+                        const forecastRows = predictionStatus === "SUCCESS"
+                          ? forecastSource.map(recordOf).map((item) => ({
+                              year: asNumber(item.year),
+                              area: asNumber(item.predicted_area_km2 ?? item.area_km2 ?? item.predicted),
+                            })).filter((item): item is { year: number; area: number } => item.year != null && item.area != null)
+                          : [];
+                        const combined = [...historicalPoints, ...forecastRows].sort((a,b) => a.year-b.year);
+                        const maxArea = Math.max(1, ...combined.map((item) => item.area));
+                        const minYear = Math.min(...combined.map((item) => item.year));
+                        const maxYear = Math.max(...combined.map((item) => item.year));
+                        const xAt = (year: number) => 52 + (maxYear === minYear ? 0 : ((year - minYear) / (maxYear - minYear)) * 496);
+                        const yAt = (area: number) => 174 - (area / maxArea) * 132;
+                        const historicalPolyline = historicalPoints.map((item) => `${xAt(item.year)},${yAt(item.area)}`).join(" ");
+                        const forecastPolyline = [...(historicalPoints.length ? [historicalPoints[historicalPoints.length-1]] : []), ...forecastRows].map((item) => `${xAt(item.year)},${yAt(item.area)}`).join(" ");
+                        const forecastDirection = forecastRows.length > 1 ? forecastRows[forecastRows.length-1].area - forecastRows[0].area : 0;
+                        return <>
+                          <div className="analysis-metrics-grid">
+                            {usable.map((item) => <article className="analysis-metric" key={item.year}><span>{item.year} observation</span><strong>{displayNumber(item.area, 3)} km²</strong><small>{item.date ? new Date(item.date).toLocaleDateString() : "Date unavailable"}</small></article>)}
+                          </div>
+                          <h4 style={{ marginTop: "18px" }}>Historical area and future retreat projection</h4>
+                          {(historicalPoints.length + forecastRows.length) > 1 ? <svg viewBox="0 0 600 235" role="img" aria-label="Historical glacier area and future area projection graph" style={{ width: "100%", maxHeight: "320px", background: "var(--soft, #f7fbfd)", borderRadius: "12px" }}>
+                            {[0,1,2,3].map((n) => <g key={n}><line x1="42" x2="570" y1={40+n*42} y2={40+n*42} stroke="var(--border, #dce8ef)" /><text x="35" y={44+n*42} textAnchor="end" fontSize="10" fill="var(--muted, #637a88)">{displayNumber(maxArea*(1-n/3),1)}</text></g>)}
+                            {historicalPolyline && <polyline points={historicalPolyline} fill="none" stroke="#1498a8" strokeWidth="4" strokeLinejoin="round" strokeLinecap="round" />}
+                            {forecastPolyline && forecastRows.length > 0 && <polyline points={forecastPolyline} fill="none" stroke="#e08a37" strokeWidth="3" strokeDasharray="7 6" strokeLinejoin="round" strokeLinecap="round" />}
+                            {historicalPoints.map((item) => <g key={`hist-${item.year}`}><circle cx={xAt(item.year)} cy={yAt(item.area)} r="5" fill="#087e8b" /><text x={xAt(item.year)} y="205" textAnchor="middle" fontSize="11" fill="var(--text, #36556a)">{item.year}</text></g>)}
+                            {forecastRows.map((item) => <g key={`future-${item.year}`}><circle cx={xAt(item.year)} cy={yAt(item.area)} r="5" fill="#e08a37" /><text x={xAt(item.year)} y="205" textAnchor="middle" fontSize="11" fill="var(--text, #36556a)">{item.year}</text></g>)}
+                            <g><line x1="64" y1="225" x2="86" y2="225" stroke="#1498a8" strokeWidth="4"/><text x="92" y="229" fontSize="11" fill="var(--text, #36556a)">Historical estimates</text><line x1="260" y1="225" x2="282" y2="225" stroke="#e08a37" strokeWidth="3" strokeDasharray="5 4"/><text x="288" y="229" fontSize="11" fill="var(--text, #36556a)">Future projection</text></g>
+                          </svg> : <div className="analysis-inline-note">At least two historical or future points are needed to draw the trend chart.</div>}
+                          {predictionStatus === "INSUFFICIENT_VALIDATION" && <div className="analysis-inline-note" role="status" style={{ marginTop: 10 }}>Future projection unavailable: fewer than two historical observations passed validation. Historical estimates remain visible for reference, but their changes should not be interpreted as confirmed glacier retreat.</div>}
+                          {forecastRows.length > 1 && <div className="analysis-inline-note" style={{ marginTop: 10 }}>{forecastDirection < 0 ? "The future area estimates trend downward, consistent with projected area loss. This is a model projection, not a validated physical retreat measurement." : forecastDirection > 0 ? "Warning: the future area estimates trend upward, so these values do not indicate glacier retreat. Review the prediction method and input observations before interpreting the result." : "The future area estimates are flat; they do not show projected area retreat."}</div>}
+                        </>;
+                      })() : key === "change_analysis" ? (() => {
+                        const change = recordOf(value);
+                        const trend = recordOf(change.overall_trend);
+                        const rows = Array.isArray(change.year_to_year_area_change) ? change.year_to_year_area_change.map(recordOf) : [];
+                        return <>
+                          <div className="data-note"><p><strong>Overall trend:</strong> {asText(trend.status, "Not available")}. {asText(trend.note, "Use caution when interpreting historical estimates.")}</p></div>
+                          {rows.map((row, index) => <div className="source-row" key={index}><div><strong>{asText(row.from_year)} → {asText(row.to_year)}</strong><p>Area change: {displayNumber(asNumber(row.area_change_km2), 3)} km² · {row.suitable_for_retreat === true ? "Passed retreat quality checks" : "Not validated for physical retreat claims"}</p></div></div>)}
+                        </>;
+                      })() : key === "prediction" ? (() => {
+                        const prediction = recordOf(value);
+                        const predictions = Array.isArray(prediction.predictions) ? prediction.predictions.map(recordOf) : [];
+                        return <>
+                          <p>{asText(prediction.prediction_method, "Trend-based estimate")} · Confidence: {asText(prediction.prediction_confidence, "unknown")}</p>
+                          <div className="analysis-metrics-grid">{predictions.map((item) => <article className="analysis-metric" key={String(item.year)}><span>Predicted {asText(item.year)}</span><strong>{displayNumber(asNumber(item.predicted_area_km2), 2)} km²</strong><small>Lower-confidence trend estimate, not a climate forecast</small></article>)}</div>
+                          <p className="scientific-note">{asText(prediction.note, "Predictions require validated observations.")}</p>
+                        </>;
+                      })() : <p>GLIMS reference: {asText(recordOf(value).status, recordOf(value).success === true ? "Available" : "No reference records returned")} · Records: {displayNumber(asNumber(recordOf(value).count) ?? (Array.isArray(recordOf(value).records) ? (recordOf(value).records as unknown[]).length : 0), 0)}</p>}
+                    </section>;
+                  })}
+                </div>
+              )}
+            </section>
+          )}
+          {page === "Debris" && (
+            <section className="content-card">
+              <div className="card-heading">
+                <div>
+                  <h2>Debris monitoring</h2>
+                  <p>
+                    Inspect debris analysis for a selected glacier.
+                  </p>
+                </div>
+                <Layers3 size={22} />
+              </div>
+              {GlacierSearch()}
+              <div style={{ marginTop: "20px" }}>
+                <button className="primary-button" type="button" onClick={() => { void runDebrisAnalysis(); }} disabled={debrisLoading || !selectedGlacier}>
+                  {debrisLoading ? <><LoaderCircle className="analysis-spinner" size={17} /> Analyzing debris…</> : <>Run debris detection <ArrowUpRight size={16} /></>}
+                </button>
+                {!selectedGlacier && <p className="search-help">Search above and select a glacier before running debris detection.</p>}
+              </div>
+              {debrisError && <div className="analysis-error" role="alert"><strong>Debris analysis failed</strong><p>{debrisError}</p><button className="secondary-button" type="button" onClick={() => { void runDebrisAnalysis(); }} disabled={debrisLoading || !selectedGlacier}>Try again</button></div>}
+              {debrisLoading && <div className="analysis-progress" role="status"><LoaderCircle className="analysis-spinner" size={22} /><div><p className="analysis-progress-title">Debris detection in progress</p><p className="analysis-progress-description">Downloading satellite inputs and generating the debris-analysis output. This may take several minutes.</p></div></div>}
+              {debrisResult && (() => {
+                const glacierArea = asNumber(debrisResult.glacier_area_km2);
+                const debrisArea = asNumber(debrisResult.debris_area_km2);
+                const debrisPercent = asNumber(debrisResult.debris_percentage);
+                const glacierPixels = asNumber(debrisResult.glacier_pixels);
+                const debrisPixels = asNumber(debrisResult.debris_pixels);
+                const spectral = recordOf(debrisResult.spectral_statistics);
+                const sentinel = recordOf(debrisResult.sentinel);
+                const rgbDownload = recordOf(debrisResult.rgb_download);
+                const imageCandidates = [
+                  { key: "debris_probability_heatmap_url", title: "Debris probability heatmap", description: "Debris probability visualization" },
+                  { key: "debris_probability_overlay_url", title: "Debris probability overlay", description: "Probability overlay over imagery" },
+                  { key: "debris_full_overlay_url", title: "Debris mask overlay", description: "Detected debris regions" },
+                  { key: "rgb_image_url", title: "Satellite image", description: "RGB Sentinel-2 input" },
+                ].map((item) => {
+                  const slug = (selectedGlacier?.rgi_id || "").toLowerCase().replace(/[.-]/g, "_");
+                  const fallbackNames: Record<string, string> = {
+                    debris_probability_heatmap_url: `${slug}_debris_probability_heatmap.png`,
+                    debris_probability_overlay_url: `${slug}_debris_probability_overlay.png`,
+                    debris_full_overlay_url: `${slug}_debris_full_overlay.png`,
+                    rgb_image_url: `${slug}_debris_full_rgb.png`,
+                  };
+                  const returned = outputUrl(debrisResult[item.key]);
+                  return { ...item, src: returned || (slug ? `${API_BASE_URL}/datasets/live/predictions/${fallbackNames[item.key]}` : "") };
+                });
+                return (
+                  <div className="analysis-results" style={{ marginTop: "22px" }}>
+                    <div className="results-title">
+                      <div>
+                        <h3>{asText(debrisResult.glacier, selectedGlacier?.name, "Debris detection")}</h3>
+                        <p>RGI ID: {asText(debrisResult.rgi_id, selectedGlacier?.rgi_id, "—")}</p>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                        <span className="success-pill"><CircleCheck size={14} /> Analysis complete</span>
+                        <button
+                          className="secondary-button"
+                          type="button"
+                          onClick={() => { void runDebrisAnalysis(); }}
+                          disabled={debrisLoading || !selectedGlacier}
+                        >
+                          {debrisLoading ? <><LoaderCircle className="analysis-spinner" size={15} /> Re-running…</> : <>Re-run analysis <ArrowUpRight size={15} /></>}
+                        </button>
+                      </div>
+                    </div>
+                    <div className="analysis-metrics-grid">
+                      <article className="analysis-metric">
+                        <span>Estimated glacier area</span>
+                        <strong>{displayNumber(glacierArea, 3)} km²</strong>
+                        <small>{displayNumber(glacierPixels, 0)} glacier pixels</small>
+                      </article>
+                      <article className="analysis-metric">
+                        <span>Estimated debris area</span>
+                        <strong>{displayNumber(debrisArea, 3)} km²</strong>
+                        <small>{displayNumber(debrisPixels, 0)} debris pixels</small>
+                      </article>
+                      <article className="analysis-metric">
+                        <span>Debris percentage</span>
+                        <strong>{displayNumber(debrisPercent, 2)}%</strong>
+                        <small>Of the detected glacier mask</small>
+                      </article>
+                      <article className="analysis-metric">
+                        <span>Satellite resolution</span>
+                        <strong>{displayNumber(asNumber(debrisResult.resolution_m), 2)} m</strong>
+                        <small>{asText(debrisResult.crs, "CRS unavailable")}</small>
+                      </article>
+                    </div>
+                    <section className="analysis-section">
+                      <div className="analysis-section-heading">
+                        <div><h4>Debris visualizations</h4><p>Generated debris maps from the latest analysis.</p></div>
+                        <span>{imageCandidates.length} images</span>
+                      </div>
+                      {imageCandidates.length > 0 ? (
+                        <div className="ai-image-grid">
+                          {imageCandidates.map((item) => (
+                            <figure className="ai-image-card" key={item.key}>
+                              <a href={item.src} target="_blank" rel="noreferrer" aria-label={`Open ${item.title} image`}>
+                                <img src={item.src} alt={item.title} loading="lazy" />
+                              </a>
+                              <figcaption><strong>{item.title}</strong><span>{item.description}</span></figcaption>
+                            </figure>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="analysis-inline-note">
+                          If an image does not load, its file may not exist at the expected output path for this glacier.
+                        </div>
+                      )}
+                    </section>
+                    <div className="analysis-detail-grid">
+                      <section className="analysis-detail-card">
+                        <h4>Observation details</h4>
+                        <dl>
+                          <div><dt>RGB scene ID</dt><dd>{asText(sentinel.rgb_scene_id, rgbDownload.selected_scene_id, "—")}</dd></div>
+                          <div><dt>Acquisition date</dt><dd>{asText(sentinel.rgb_acquisition_datetime, rgbDownload.selected_datetime, "—")}</dd></div>
+                          <div><dt>Cloud cover</dt><dd>{asNumber(rgbDownload.selected_cloud_cover) != null ? `${displayNumber(asNumber(rgbDownload.selected_cloud_cover))}%` : "—"}</dd></div>
+                          <div><dt>Coordinate reference</dt><dd>{asText(debrisResult.crs, "—")}</dd></div>
+                          <div><dt>Exact scene match verified</dt><dd>{sentinel.exact_scene_match_verified === true ? "Yes" : "No"}</dd></div>
+                        </dl>
+                      </section>
+                      <section className="analysis-detail-card">
+                        <h4>Spectral statistics</h4>
+                        <dl>
+                          <div><dt>Mean B08 (NIR)</dt><dd>{displayNumber(asNumber(spectral.mean_b08), 4)}</dd></div>
+                          <div><dt>Mean B11 (SWIR1)</dt><dd>{displayNumber(asNumber(spectral.mean_b11), 4)}</dd></div>
+                          <div><dt>Mean B12 (SWIR2)</dt><dd>{displayNumber(asNumber(spectral.mean_b12), 4)}</dd></div>
+                          <div><dt>Mean SWIR1/NIR</dt><dd>{displayNumber(asNumber(spectral.mean_swir1_nir), 4)}</dd></div>
+                          <div><dt>Mean SWIR2/NIR</dt><dd>{displayNumber(asNumber(spectral.mean_swir2_nir), 4)}</dd></div>
+                        </dl>
+                      </section>
+                    </div>
+                    <p className="scientific-note">
+                      {asText(debrisResult.scientific_note, "Debris values are spectral estimates and require independent validation before scientific interpretation.")}
+                      {sentinel.exact_scene_match_verified !== true ? " The spectral downloader has not independently verified an exact match to the RGB scene." : ""}
+                    </p>
+                  </div>
+                );
+              })()}
+            </section>
+          )}
+          {page === "Reports" && (
+            <section className="content-card">
+              <div className="card-heading">
+                <div>
+                  <h2>Monitoring reports</h2>
+                  <p>
+                    View and export the latest available glacier analysis results.
+                  </p>
+                </div>
+                <FileText size={22} />
+              </div>
+              <div className="report-row">
+                <div className="report-icon">
+                  <FileText size={22} />
+                </div>
+                <div>
+                  <strong>Glacier monitoring report</strong>
+                  <p>Includes available AI segmentation, debris estimates, historical observations, retreat-quality status, predictions and observation metadata.</p>
+                </div>
+                <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+                  <button className="secondary-button" onClick={viewReport}><FileText size={16} /> View report</button>
+                  <button className="primary-button" onClick={downloadReport}><Download size={16} /> Export report</button>
+                </div>
+              </div>
+            </section>
+          )}
+          <footer className="footer">
+            <div className="footer-brand">
+              <Snowflake size={17} /> GlacierAI
+            </div>
+            <span>AI-based glacier monitoring and retreat analysis</span>
+            <span>Research workspace</span>
+          </footer>
+        </div>
+      </main>
     </div>
-
   );
 }
-
-
-/* =========================================================
-   SMALL COMPONENTS
-========================================================= */
-
-function MetricCard({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-
-  return (
-
-    <div className="metric-card">
-
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value}
-      </strong>
-
-    </div>
-
-  );
-}
-
-
-function ResultStat({
-  label,
-  value,
-}: {
-  label: string;
-  value: string;
-}) {
-
-  return (
-
-    <div className="result-stat">
-
-      <span>
-        {label}
-      </span>
-
-      <strong>
-        {value}
-      </strong>
-
-    </div>
-
-  );
-}
-
-
 export default App;

@@ -1,6 +1,5 @@
 from pathlib import Path
 import json
-import re
 from datetime import datetime, timezone
 
 import numpy as np
@@ -271,15 +270,17 @@ def validate_historical_glacier(glacier_name):
     # Historical directory
     # --------------------------------------------------------
 
-    slug = re.sub(
-        r"[^a-z0-9]+",
-        "_",
-        rgi_name.lower(),
-    ).strip("_")
-
+    # Historical results are stored using the resolved RGI ID.
+    # This keeps validation compatible with the RGI-based folder
+    # structure used by the historical analysis pipeline.
+    #
+    # Example:
+    #   Kolahoi -> RGI2000-v7.0-G-14-34651
+    #   datasets/historical/rgi2000-v7.0-g-14-34651/
+    #       historical_results.json
     results_file = (
         HISTORICAL_DIR
-        / slug
+        / str(rgi_id).lower()
         / "historical_results.json"
     )
 
@@ -494,12 +495,36 @@ def validate_historical_glacier(glacier_name):
 # ============================================================
 
 def main():
+    """
+    Validate historical observations for any glacier.
 
-    # Change this only when running the script manually.
-    glacier_name = "Mana Glacier"
+    Usage:
+        python backend/scripts/validate_historical.py "Kolahoi"
+        python backend/scripts/validate_historical.py "Gangotri"
+        python backend/scripts/validate_historical.py "Zemu Glacier"
+
+    The glacier is resolved through the RGI service, so no
+    glacier-specific folder or RGI ID is hardcoded here.
+    """
+
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Validate existing historical U-Net masks "
+            "against the RGI 7.0 inventory."
+        )
+    )
+
+    parser.add_argument(
+        "glacier_name",
+        help="Glacier name, alias, or RGI ID",
+    )
+
+    args = parser.parse_args()
 
     validate_historical_glacier(
-        glacier_name
+        args.glacier_name
     )
 
 
