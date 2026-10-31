@@ -199,4 +199,10 @@ These folders support their respective workflows. Their contents may be generate
 Dataset download links and access instructions should be added here when the corresponding data packages are prepared for distribution.
 
 
+## Downloading Datasets
 
+All required datasets are available here:
+
+[Download GlacierAI Datasets]([https://drive.google.com/drive/folders/14NJRWzdT7fXGDfUfTEfJZZRLLgEjzZB7?usp=sharing](https://drive.google.com/drive/folders/14NJRWzdT7fXGDfUfTEfJZZRLLgEjzZB7?usp=sharing))
+
+Download the required files and maintain the folder structure described above.

@@ -224,5 +224,11 @@ Training workflows require the corresponding training datasets and compatible Py
 
 The existing trained checkpoints allow the application to perform inference without retraining the models.
 
+## Downloading Model Checkpoints
 
+Trained model checkpoints are available here:
+
+[Download GlacierAI Models]([https://drive.google.com/drive/folders/14NJRWzdT7fXGDfUfTEfJZZRLLgEjzZB7?usp=sharing](https://drive.google.com/drive/folders/14NJRWzdT7fXGDfUfTEfJZZRLLgEjzZB7?usp=sharing))
+
+Place the downloaded files in their respective checkpoint directories.
 
